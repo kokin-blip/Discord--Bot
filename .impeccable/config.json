@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "createdAt": "2026-10-05T06:27:07.711Z",
+        "reason": "Agent: intentional system font for compact financial chart snapshots; external font requests are blocked and both rendered previews were visually verified as readable."
+      }
+    ]
+  }
+}
