@@ -28,7 +28,7 @@ npx wrangler secret put ALPACA_API_SECRET
 npx wrangler secret put TEST_CHANNEL_ID
 ```
 
-5. Copy `.env.example` to `.env`, set local registration/preflight values, and run `npm run register` and `npm run preflight`. Registration replaces this application's guild command list. The preflight tests local access, not deployed Cloudflare connectivity or performance.
+5. Copy `.env.example` to `.env`, set local registration/preflight values, and run `npm run register` and `npm run preflight`. Registration requires only the bot token and application ID and replaces this application's global command list, with commands restricted to server installations and server channels. The deployed runtime still requires `DISCORD_GUILD_ID` for its single private server; global command registration does not enable multi-server scheduling or settings. The preflight tests local access, not deployed Cloudflare connectivity or performance.
 6. After the account checkpoint, set `FREE_PLAN_CONFIRMED` to `true` in `wrangler.jsonc`. Run `npm run worker:build`, then `npm run deploy`. Set Discord's Interactions Endpoint URL to `https://<your-worker>.workers.dev/interactions`. Discord's signed PING verification must succeed; unsigned payloads return HTTP 401.
 7. Use `/status`, `/watch add`, and `/config channels`. All six routes must eventually be assigned: `equity_ideas`, `crypto_ideas`, `updates`, `watchlist`, `summaries`, `operations`. Several routes can share a channel. In test mode publication uses only the private test channel, regardless of normal destinations.
 

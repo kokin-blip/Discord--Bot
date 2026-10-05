@@ -3,7 +3,7 @@ export class HttpClient {
   private last = new Map<string, number>();
   constructor(
     private store?: Store,
-    private fetcher: typeof fetch = fetch,
+    private fetcher: typeof fetch = fetch.bind(globalThis),
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
   async json<T>(url: URL | string, headers: Record<string, string> = {}): Promise<T> {

@@ -1,11 +1,22 @@
 import { Store } from '../src/storage.js';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { nyTime, Alpaca } from '../src/adapters/alpaca.js';
 import { HttpClient } from '../src/adapters/http.js';
 import { checkDaily, checkIntraday, historyChanged } from '../src/core/quality.js';
 import { DAY, QUARTER, weeklyBars } from '../src/core/time.js';
 import { fixture } from './fixtures.js';
 import { equity } from '../src/domain.js';
+it('binds the default fetch to the global receiver required by Workers', async () => {
+  vi.stubGlobal('fetch', function (this: unknown) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation');
+    return Promise.resolve(Response.json({ ok: true }));
+  });
+  try {
+    expect(await new HttpClient().json('https://example.test')).toEqual({ ok: true });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it('handles New York daylight saving and early closes', () => {
   expect(new Date(nyTime('2026-01-05', '09:30')).toISOString()).toBe('2026-01-05T14:30:00.000Z');
   expect(new Date(nyTime('2026-07-06', '09:30')).toISOString()).toBe('2026-07-06T13:30:00.000Z');
