@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "discord-trading-signals",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "triggers": { "crons": ["* * * * *"] },
+  "durable_objects": { "bindings": [{ "name": "SIGNALS", "class_name": "SignalCoordinator" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SignalCoordinator"] }],
+  "browser": { "binding": "BROWSER" },
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }],
+  "vars": {
+    "DISCORD_APPLICATION_ID": "1556528084809683056",
+    "RELEASE_MODE": "test",
+    "FREE_PLAN_CONFIRMED": "false",
+  },
+}

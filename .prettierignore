@@ -1,0 +1,7 @@
+node_modules
+package-lock.json
+dist
+output
+.wrangler
+src/worker/chart-library.txt
+docs/LICENSE-lightweight-charts.txt

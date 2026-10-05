@@ -1,0 +1,65 @@
+import puppeteer from '@cloudflare/puppeteer';
+import type { Candidate, Dataset } from '../domain.js';
+import type { Env } from './types.js';
+import type { CloudBudget } from './budget.js';
+import { chartSnapshot } from '../chart-snapshot.js';
+import library from './chart-library.txt';
+export class CloudCharts {
+  constructor(
+    readonly env: Env,
+    readonly budget: CloudBudget,
+  ) {}
+  async render(data: Dataset, candidate?: Candidate): Promise<Buffer> {
+    if (!this.budget.reserveBrowser(Date.now()))
+      throw new Error('BROWSER_FREE_ALLOWANCE_UNAVAILABLE');
+    let active: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        expired = true;
+        void active?.close().catch(() => {});
+        reject(new Error('CHART_RENDER_TIMEOUT'));
+      }, 15_000);
+    });
+    const job = chartSnapshot(
+      async () => {
+        const browser = await puppeteer.launch(
+          this.env.BROWSER as unknown as Parameters<typeof puppeteer.launch>[0],
+          { keep_alive: 20_000 },
+        );
+        active = browser;
+        if (expired) {
+          await browser.close();
+          throw new Error('CHART_RENDER_TIMEOUT');
+        }
+        return {
+          close: () => browser.close(),
+          newPage: async ({ viewport }: { viewport: { width: number; height: number } }) => {
+            const page = await browser.newPage();
+            await page.setViewport(viewport);
+            page.setDefaultTimeout(10_000);
+            return {
+              route: async () => {
+                await page.setRequestInterception(true);
+                page.on('request', (request) => void request.abort());
+              },
+              setContent: page.setContent.bind(page),
+              addScriptTag: page.addScriptTag.bind(page),
+              evaluate: page.evaluate.bind(page),
+              screenshot: page.screenshot.bind(page),
+            };
+          },
+        };
+      },
+      library,
+      data,
+      candidate,
+    );
+    try {
+      return await Promise.race([job, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}

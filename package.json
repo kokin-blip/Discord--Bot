@@ -1,0 +1,42 @@
+{
+  "name": "discord-trading-signals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc",
+    "start": "wrangler dev",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "register": "tsx --env-file=.env scripts/register.ts",
+    "replay": "tsx scripts/replay.ts",
+    "preview": "tsx scripts/preview.ts",
+    "preflight": "tsx --env-file=.env scripts/preflight.ts",
+    "deploy": "wrangler deploy",
+    "worker:build": "wrangler deploy --dry-run --outdir output/worker",
+    "worker:types": "wrangler types",
+    "format": "prettier --write src scripts tests docs *.json *.jsonc *.md .github",
+    "format:check": "prettier --check src scripts tests docs *.json *.jsonc *.md .github"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
+    "discord.js": "14.27.0",
+    "lightweight-charts": "5.0.9",
+    "playwright": "^1.58.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261005.1",
+    "@types/node": "^24.10.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18",
+    "wrangler": "^4.147.0"
+  }
+}

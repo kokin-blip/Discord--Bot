@@ -1,0 +1,1 @@
+The vendored `src/worker/chart-library.txt` is TradingView Lightweight Charts 5.0.9, copyright TradingView, Inc., distributed under Apache License 2.0. See `docs/LICENSE-lightweight-charts.txt`. Generated charts retain TradingView attribution and logo; Discord cards include an Open TradingView link. Charts are generated from provider data, not personal TradingView screenshots.
