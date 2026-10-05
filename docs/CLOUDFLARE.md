@@ -16,7 +16,7 @@ Browser Run allows ten browser minutes/day and one launch every 20 seconds. The 
 
 1. Create a Discord application/bot and invite it to the private server with `bot` and `applications.commands` scopes. Grant View Channel, Send Messages, Embed Links, Attach Files, Read Message History, Create Public Threads, and Send Messages in Threads on every destination. Gateway/privileged intents are unnecessary; the code uses `discord.js` for REST and command structures without logging into the Gateway.
 2. Obtain Alpaca Basic API credentials with calendar/assets access and historical SIP entitlement. Equity requests use `feed=sip`, adjusted history, and `end=now−16 minutes`; no paid live feed is required. Coinbase Exchange candle endpoints are public.
-3. Run `npx wrangler login`. Review `wrangler.jsonc`, including your application ID. Keep `RELEASE_MODE=test`.
+3. Run `npx wrangler login`. Review `wrangler.jsonc`, including your application ID. Its Worker name is `discord--bot`, matching the existing Workers Builds connection; Cloudflare requires the configured and connected names to match. Keep `RELEASE_MODE=test`.
 4. Set secrets interactively:
 
 ```sh
@@ -41,3 +41,7 @@ Before normal publication, exercise 10 auto selections, 10 manual pins, and up t
 Seven healthy days are measured by completed scans and monitored data quality. A gap over ten minutes, data-quality failure, or publication failure resets the soak. Production adds historical-review and destination validation gates. Set `RELEASE_MODE=production` and redeploy only after the validation procedure; do not clear gates to bypass a failed workload.
 
 No deployment has been performed by the local implementation checks. Credentials and account confirmation are still required. The $0 feasibility checkpoint is therefore pending, rather than assumed passed.
+
+## Connected build diagnostics
+
+The repository already has a Workers Builds connection for `discord--bot`. GitHub exposes its pass/fail check but not detailed build logs; those require Cloudflare dashboard sign-in. If that check fails after the name match, inspect the linked build log for the exact cause. Do not infer that local bundling proves remote deployment. See [Cloudflare build troubleshooting](https://developers.cloudflare.com/workers/ci-cd/builds/troubleshoot/).
