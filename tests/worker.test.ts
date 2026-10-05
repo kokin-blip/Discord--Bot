@@ -2,6 +2,20 @@ import { it, expect } from 'vitest';
 import { verifySignature } from '../src/worker/signature.js';
 import { CloudSql } from '../src/worker/sql.js';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
+import { diagnosticCode } from '../src/core/errors.js';
+it('keeps provider failure codes without exposing arbitrary exception contents', () => {
+  expect(diagnosticCode(new Error('DATA_HTTP_401:paper-api.alpaca.markets'))).toBe(
+    'DATA_HTTP_401:paper-api.alpaca.markets',
+  );
+  expect(diagnosticCode(new Error('NETWORK_UNAVAILABLE:api.exchange.coinbase.com'))).toBe(
+    'NETWORK_UNAVAILABLE:api.exchange.coinbase.com',
+  );
+  expect(diagnosticCode(new Error('TEST_CHANNEL_REQUIRED'))).toBe('TEST_CHANNEL_REQUIRED');
+  expect(diagnosticCode(new Error('request failed with Authorization: secret-token'))).toBe(
+    'WORKER_OPERATION_FAILED',
+  );
+  expect(diagnosticCode(new Error('DATA_HTTP_401:secret-token'))).toBe('WORKER_OPERATION_FAILED');
+});
 it('verifies Discord Ed25519 signatures and rejects changed, expired, and malformed requests', async () => {
   const pair = (await crypto.subtle.generateKey('Ed25519', true, [
     'sign',

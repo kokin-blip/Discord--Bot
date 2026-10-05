@@ -5,6 +5,25 @@ import type { DataService } from '../src/data.js';
 import { fixture, idea } from './fixtures.js';
 import { equity } from '../src/domain.js';
 import { utcDate } from '../src/core/time.js';
+it('records the failing scan stage and provider code and clears the running flag', async () => {
+  const s = new Store(':memory:');
+  try {
+    const data = {
+      universe: async () => {
+        throw new Error('DATA_HTTP_401:paper-api.alpaca.markets');
+      },
+    } as unknown as DataService;
+    const service = new SignalService(s, data);
+    await expect(service.scan(Date.now())).rejects.toThrow('DATA_HTTP_401');
+    expect(service.running).toBe(false);
+    expect(s.get('last_scan', null)).toBeNull();
+    expect(s.get('last_error', null)).toBe('DATA_HTTP_401:paper-api.alpaca.markets');
+    expect(s.get('last_error_stage', null)).toBe('discovery');
+    expect(s.get<{ stage: string }>('scan_progress', { stage: '' }).stage).toBe('failed');
+  } finally {
+    s.close();
+  }
+});
 it('publishes a fresh delayed equity confirmation during normal polling', async () => {
   const s = new Store(':memory:');
   try {

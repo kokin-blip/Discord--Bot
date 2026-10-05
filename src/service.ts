@@ -6,6 +6,7 @@ import { advance, detect, makeEvent, rank, stableId, pivotLevels } from './core/
 import { atr, mean } from './core/indicators.js';
 import { checkIntraday } from './core/quality.js';
 import { DAY, QUARTER, utcDate } from './core/time.js';
+import { diagnosticCode } from './core/errors.js';
 export class SignalService {
   running = false;
   constructor(
@@ -18,9 +19,12 @@ export class SignalService {
     this.running = true;
     const previous = this.store.get('last_scan', 0),
       recovery = !previous || now - previous > 10 * 60_000;
+    const progress = (stage: string) => this.store.set('scan_progress', { stage, at: Date.now() });
     try {
+      progress('discovery');
       const newDay = this.store.get('discovery_day', '') !== utcDate(now),
         pool = newDay || force ? await this.data.universe(now) : [];
+      progress('daily_history');
       await this.data.refreshDaily([...pool, ...this.store.monitored()], now, force);
       const config = this.store.strategy(),
         candidates: Candidate[] = [];
@@ -43,7 +47,9 @@ export class SignalService {
         now,
         force,
       );
+      progress('intraday_history');
       await this.data.refreshIntraday(instruments, now);
+      progress('strategy_evaluation');
       let recovered = 0;
       for (const i of instruments) {
         try {
@@ -150,6 +156,13 @@ export class SignalService {
       const failed = instruments.filter((i) => this.store.get(`quality:${i.id}`, null) !== null);
       if (!failed.length && instruments.length) this.health(now);
       else this.store.set('soak_start', 0);
+      progress('complete');
+    } catch (error) {
+      const stage = this.store.get<{ stage: string }>('scan_progress', { stage: 'unknown' }).stage;
+      this.store.set('last_error_stage', stage);
+      this.store.set('last_error', diagnosticCode(error));
+      progress('failed');
+      throw error;
     } finally {
       this.running = false;
     }

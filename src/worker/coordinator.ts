@@ -21,6 +21,7 @@ import { SignalService } from '../service.js';
 import { DiscordPublisher } from '../discord/publisher.js';
 import { CommandHandler } from '../discord/commands.js';
 import { routes } from '../config.js';
+import { diagnosticCode } from '../core/errors.js';
 export class SignalCoordinator {
   readonly store: Store;
   readonly budget: CloudBudget;
@@ -150,15 +151,13 @@ export class SignalCoordinator {
           }
         }
         this.store.set('last_error', null);
+        this.store.set('last_error_stage', null);
         return new Response('Tick complete');
       } finally {
         this.busy = false;
       }
     } catch (e) {
-      this.store.set(
-        'last_error',
-        e instanceof Error && /^[A-Z_]+$/.test(e.message) ? e.message : 'WORKER_OPERATION_FAILED',
-      );
+      this.store.set('last_error', diagnosticCode(e));
       this.store.set('soak_start', 0);
       return new Response('Operation unavailable; inspect /status.', { status: 503 });
     }

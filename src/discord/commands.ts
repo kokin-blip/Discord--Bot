@@ -307,6 +307,8 @@ export class CommandHandler {
               running: this.service.running,
               lastScan: this.store.get('last_scan', null),
               lastError: this.store.get('last_error', null),
+              lastErrorStage: this.store.get('last_error_stage', null),
+              scanProgress: this.store.get('scan_progress', null),
               pendingDeliveries: this.store.pendingCount(),
               activeIdeas: this.store.activeIdeas().length,
               activeEntries: this.store.activeEntries(),
