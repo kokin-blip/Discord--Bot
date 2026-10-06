@@ -129,3 +129,82 @@ it('journals recovery entries without publishing them as fresh signals', async (
     s.close();
   }
 });
+it.each(['bullish', 'bearish'] as const)(
+  'publishes one current %s pending setup snapshot across repeated polling and recovery',
+  async (direction) => {
+    const s = new Store(':memory:');
+    try {
+      const d = fixture(direction);
+      d.instrument = equity('TEST');
+      d.intraday[0]!.close = direction === 'bullish' ? 111.5 : 88.5;
+      d.sessions = [
+        {
+          date: utcDate(d.intraday[0]!.start),
+          open: d.intraday[0]!.start,
+          close: d.intraday[0]!.end,
+        },
+      ];
+      s.pin(d.instrument);
+      const pending = idea(d);
+      s.saveIdea(pending, [], false);
+      const now = d.provenance.asOf + 16 * 60_000;
+      s.set('discovery_day', utcDate(now));
+      const data = {
+        refreshDaily: async () => {},
+        refreshIntraday: async () => {},
+        dataset: async () => d,
+        universe: async () => [],
+      } as unknown as DataService;
+      const service = new SignalService(s, data);
+      await service.scan(now);
+      const snapshots = () =>
+        s.journal(pending.candidate.id).filter((e) => e.kind === 'setup_snapshot');
+      expect(snapshots()).toHaveLength(1);
+      expect(snapshots()[0]?.state).toBe('setup_ready');
+      expect(snapshots()[0]?.candidate.entry).toBeUndefined();
+      expect(snapshots()[0]?.setupContext?.remainingSessions).toBe(1);
+      expect(s.pending(now).filter((p) => p.event.kind === 'setup_snapshot')).toHaveLength(1);
+      expect(s.idea(pending.candidate.id)?.state).toBe('setup_ready');
+      s.set('last_scan', 0); // simulate recovery after restarting
+      await new SignalService(s, data).scan(now);
+      expect(snapshots()).toHaveLength(1);
+    } finally {
+      s.close();
+    }
+  },
+);
+it('does not snapshot invalidated setups or instruments failing data quality', async () => {
+  for (const mode of ['invalidated', 'quality'] as const) {
+    const s = new Store(':memory:');
+    try {
+      const d = fixture();
+      d.instrument = equity('TEST');
+      d.intraday[0]!.close = mode === 'invalidated' ? 109 : 111.5;
+      d.sessions = [
+        {
+          date: utcDate(d.intraday[0]!.start),
+          open: d.intraday[0]!.start,
+          close: d.intraday[0]!.end,
+        },
+      ];
+      s.pin(d.instrument);
+      s.saveIdea(idea(d), [], false);
+      const now = d.provenance.asOf + 16 * 60_000;
+      s.set('discovery_day', utcDate(now));
+      const data = {
+        refreshDaily: async () => {},
+        refreshIntraday: async () => {},
+        dataset: async () => {
+          if (mode === 'quality') throw new Error('MISSING_DAILY_CANDLES');
+          return d;
+        },
+        universe: async () => [],
+      } as unknown as DataService;
+      await new SignalService(s, data).scan(now);
+      expect(s.journal().some((e) => e.kind === 'setup_snapshot')).toBe(false);
+      expect(s.pending(now).some((p) => p.event.state === 'entry_triggered')).toBe(false);
+    } finally {
+      s.close();
+    }
+  }
+});

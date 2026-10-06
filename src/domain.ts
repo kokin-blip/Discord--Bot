@@ -74,6 +74,8 @@ export interface Candidate {
   reasons: string[];
 }
 export interface SignalEvent {
+  kind?: 'lifecycle' | 'setup_snapshot';
+  setupContext?: { entryBand: [number, number]; remainingSessions: number; totalSessions: number };
   id: string;
   ideaId: string;
   instrument: Instrument;

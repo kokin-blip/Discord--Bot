@@ -3,12 +3,24 @@ import { fixture, idea } from '../tests/fixtures.js';
 import { Charts } from '../src/charts.js';
 import { defaults } from '../src/config.js';
 import { advance } from '../src/core/strategy.js';
+import { card } from '../src/discord/cards.js';
 await mkdir('output', { recursive: true });
 const charts = new Charts();
 for (const direction of ['bullish', 'bearish'] as const) {
   const data = fixture(direction),
     result = advance(idea(data), data, defaults, data.provenance.asOf);
-  const image = await charts.render(data, result.idea.candidate);
-  await writeFile(`output/${direction}-preview.png`, image);
-  console.log(`${direction}: ${image.length} bytes`);
+  for (const event of result.events) {
+    const name =
+      event.state === 'entry_triggered' ? `${direction}-preview` : `${direction}-setup-preview`;
+    const frozen = {
+      ...data,
+      daily: data.daily.filter((b) => b.end <= event.marketTime),
+      weekly: data.weekly.filter((b) => b.end <= event.marketTime),
+      provenance: event.provenance,
+    };
+    const image = await charts.render(frozen, event.candidate);
+    await writeFile(`output/${name}.png`, image);
+    await writeFile(`output/${name}-card.json`, JSON.stringify(card(event).toJSON(), null, 2));
+    console.log(`${name}: ${image.length} bytes`);
+  }
 }

@@ -83,7 +83,16 @@ export class SignalService {
               milestones: [],
               createdAt: now,
             };
-            const event = makeEvent(idea, 'watching', c.breakout.end, dataset, now, c.reasons);
+            const event = makeEvent(
+              idea,
+              'watching',
+              c.breakout.end,
+              dataset,
+              now,
+              c.reasons.filter((r) => r !== 'Low-volume daily retest qualified'),
+              undefined,
+              config,
+            );
             event.recovery = recovery || now - event.marketTime > DAY;
             this.store.saveIdea(idea, [event]);
             existing.push(idea);
@@ -107,6 +116,28 @@ export class SignalService {
               if (event.recovery) recovered++;
             }
             this.store.saveIdea(result.idea, result.events);
+            if (
+              result.idea.candidate.entry === undefined &&
+              !terminalStates.has(result.idea.state) &&
+              !this.store.hasIdeaPublication(result.idea.candidate.id)
+            ) {
+              const snapshot = makeEvent(
+                result.idea,
+                result.idea.state,
+                dataset.intraday.at(-1)!.end,
+                dataset,
+                now,
+                [
+                  'Current setup snapshot; no historical entry signal replayed',
+                  ...result.idea.candidate.reasons,
+                ],
+                undefined,
+                this.store.version(result.idea.candidate.strategyVersion),
+              );
+              snapshot.id = stableId('setup-snapshot', snapshot.ideaId);
+              snapshot.kind = 'setup_snapshot';
+              this.store.saveIdea(result.idea, [snapshot]);
+            }
           }
           if (this.store.settings().alerts && !recovery) this.alerts(dataset, now);
           this.store.set(`quality:${i.id}`, null);

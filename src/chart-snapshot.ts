@@ -1,4 +1,5 @@
 import type { Candidate, Dataset } from './domain.js';
+import { referenceGeometry } from './core/geometry.js';
 export async function chartSnapshot(
   launch: () => Promise<any>,
   library: string,
@@ -22,12 +23,14 @@ export async function chartSnapshot(
         daily,
         weekly,
         c,
+        geometry,
         title,
         details,
       }: {
         daily: Dataset['daily'];
         weekly: Dataset['weekly'];
         c?: Candidate;
+        geometry?: ReturnType<typeof referenceGeometry>;
         title: string;
         details: string;
       }) => {
@@ -106,9 +109,12 @@ export async function chartSnapshot(
               autoscaleInfoProvider: (original: () => any) => {
                 const info = original();
                 if (info) {
-                  const levels = [c.baseLow, c.baseHigh, c.entry, ...(c.targets ?? [])].filter(
-                    (x): x is number => x !== undefined,
-                  );
+                  const levels = [
+                    c.baseLow,
+                    c.baseHigh,
+                    geometry?.entry,
+                    ...(geometry?.targets ?? []),
+                  ].filter((x): x is number => x !== undefined);
                   info.priceRange.minValue = Math.min(info.priceRange.minValue, ...levels);
                   info.priceRange.maxValue = Math.max(info.priceRange.maxValue, ...levels);
                 }
@@ -119,8 +125,21 @@ export async function chartSnapshot(
               [c.baseHigh, 'Base high', '#63748d'],
               [c.baseLow, 'Base low', '#63748d'],
               [c.level, 'Breakout / invalidation close', '#e9b35d'],
-              [c.entry, 'Entry reference', '#57a8f1'],
-              ...(c.targets ?? []).map((t: number, i: number) => [t, `T${i + 1}`, '#22c6a8']),
+              [
+                geometry?.entry,
+                geometry?.provisional ? 'Hypothetical entry' : 'Entry reference',
+                '#57a8f1',
+              ],
+              [
+                c.retest ? (c.direction === 'bullish' ? c.retest.high : c.retest.low) : undefined,
+                '15m trigger',
+                '#b293df',
+              ],
+              ...(geometry?.targets ?? []).map((t: number, i: number) => [
+                t,
+                `${geometry?.provisional ? 'Provisional ' : ''}T${i + 1}`,
+                '#22c6a8',
+              ]),
             ] as [number | undefined, string, string][]) {
               if (price !== undefined && !(label.startsWith('Base') && price === c.level))
                 candles.createPriceLine({
@@ -139,13 +158,13 @@ export async function chartSnapshot(
                   position: c.direction === 'bullish' ? 'belowBar' : 'aboveBar',
                   color: '#e9b35d',
                   shape: c.direction === 'bullish' ? 'arrowUp' : 'arrowDown',
-                  text: 'Breakout',
+                  text: c.direction === 'bullish' ? 'Breakout' : 'Breakdown',
                 },
                 ...(c.retest
                   ? [
                       {
                         time: c.retest.start / 1000,
-                        position: 'belowBar',
+                        position: c.direction === 'bullish' ? 'belowBar' : 'aboveBar',
                         color: '#57a8f1',
                         shape: 'circle',
                         text: 'Retest',
@@ -162,6 +181,7 @@ export async function chartSnapshot(
         daily: data.daily.slice(-100),
         weekly: data.weekly.slice(-60),
         c: candidate,
+        geometry: candidate ? referenceGeometry(candidate) : undefined,
         title: `${data.instrument.symbol} · ${candidate?.direction.toUpperCase() ?? 'MARKET CHART'} · ${data.instrument.venue}`,
         details: `${data.provenance.feed} · data ${new Date(data.provenance.asOf).toISOString()} · ${data.provenance.delayMinutes}m minimum delay`,
       },

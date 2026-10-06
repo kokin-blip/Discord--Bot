@@ -41,9 +41,12 @@ it('keeps an append-only journal and deduplicates the outbox across restarts', (
     expect(() => s.db.exec('DELETE FROM events')).toThrow('append-only');
     expect(() => s.db.exec("UPDATE events SET body='{}'")).toThrow('append-only');
     s.delivered(r.events[0]!.id);
+    s.saveReceipt(r.events[0]!.id, 'channel', 'message-one');
+    s.saveReceipt(r.events[0]!.id, 'channel', 'message-two');
     s.close();
     s = new Store(path);
     expect(s.pendingCount()).toBe(1);
+    expect(s.receipt(r.events[0]!.id, 'channel')).toBe('message-one');
     expect(s.idea(r.idea.candidate.id)!.candidate.entry).toBe(112.5);
   } finally {
     s.close();

@@ -33,6 +33,7 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Event journal is append-only'); END;
       CREATE TABLE IF NOT EXISTS outbox(event_id TEXT PRIMARY KEY REFERENCES events(id),route TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT);
       CREATE TABLE IF NOT EXISTS threads(idea_id TEXT PRIMARY KEY,channel_id TEXT NOT NULL,message_id TEXT NOT NULL,thread_id TEXT);
+      CREATE TABLE IF NOT EXISTS delivery_receipts(event_id TEXT NOT NULL REFERENCES events(id),destination TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(event_id,destination));
       CREATE TABLE IF NOT EXISTS cooldowns(key TEXT PRIMARY KEY,time INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS strategy_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
       ${this.db.mode === 'cloud' ? '' : 'PRAGMA user_version=1;'} `);
@@ -262,6 +263,27 @@ export class Store {
     return Number(
       (this.db.prepare("SELECT count(*) AS n FROM outbox WHERE status='pending'").get() as Row).n,
     );
+  }
+  hasIdeaPublication(ideaId: string): boolean {
+    return (
+      !!this.thread(ideaId) ||
+      !!this.db
+        .prepare(
+          'SELECT 1 FROM outbox o JOIN events e ON e.id=o.event_id WHERE e.idea_id=? LIMIT 1',
+        )
+        .get(ideaId)
+    );
+  }
+  receipt(eventId: string, destination: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT message_id FROM delivery_receipts WHERE event_id=? AND destination=?')
+      .get(eventId, destination) as Row | undefined;
+    return row ? String(row.message_id) : undefined;
+  }
+  saveReceipt(eventId: string, destination: string, messageId: string) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO delivery_receipts VALUES(?,?,?)')
+      .run(eventId, destination, messageId);
   }
   delivered(id: string) {
     this.db

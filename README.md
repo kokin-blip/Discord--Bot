@@ -38,6 +38,10 @@ All members can inspect; administrators or the configured manager role change sh
 
 ## Behavior
 
+Watched symbols automatically publish qualified breakouts, daily retest readiness, and confirmed entries to their equity/crypto ideas channel. Each idea has one discussion thread; later cards stay visible in the main channel and their details are mirrored into the thread. Milestones and terminal outcomes use the updates channel. Before entry, cards and charts label the 0.5-ATR ranking reference, targets, and R/R as hypothetical; the actual retest trigger, allowed entry band, and remaining session window are separate. At entry, levels are finalized from the confirming close, which is a signal reference rather than a fill.
+
+Initial monitoring and recovery can publish one current snapshot of a still-valid pre-entry setup that has never been announced. Historical entries remain suppressed. Per-destination delivery receipts prevent successful messages from being repeated when a thread mirror fails and retries. No manual `/scan` is needed for automatic strategy alerts. Test mode retains all publishing in the configured test channel.
+
 Daily discovery advances in bounded batches across active listings and retains the 300 most liquid eligible equities and 50 crypto pairs. Qualifying candidates are ranked deterministically; up to 10 become the automatic watchlist. Monitoring runs every five minutes, using at least 16-minute-old consolidated equity data. Market calendars account for holidays, early closes, and New York daylight saving time; crypto days/weeks use UTC/Monday.
 
 Each idea preserves its original strategy version and levels. Completed bars drive lifecycle events; missing history pauses decisions. Revised historical prices/volume expire affected ideas and require a coherent refresh. Existing ideas remain monitored after watchlist removal. At most 20 nonterminal ideas are tracked simultaneously.

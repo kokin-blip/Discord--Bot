@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Bar, Candidate, Dataset, Direction, Idea, SignalEvent, State } from '../domain.js';
 import { terminalStates } from '../domain.js';
 import type { StrategyConfig } from '../config.js';
+import { defaults } from '../config.js';
 import { atr, mean, relativeStrength, sma } from './indicators.js';
 import { completed, sessionsAfter, validateBars } from './time.js';
 export const stableId = (...parts: unknown[]) =>
@@ -158,8 +159,38 @@ export function makeEvent(
   now: number,
   reasons: string[],
   observations?: string[],
+  config: StrategyConfig = defaults,
 ): SignalEvent {
+  const candidate = structuredClone(idea.candidate);
+  if (candidate.retest && candidate.retest.end > marketTime) {
+    delete candidate.retest;
+    candidate.reasons = candidate.reasons.filter((r) => r !== 'Low-volume daily retest qualified');
+  }
+  const s = sign(candidate.direction),
+    totalSessions = candidate.retest ? config.confirmationSessions : config.retestBars,
+    remainingSessions = Math.max(
+      0,
+      totalSessions -
+        sessionsAfter(
+          candidate.retest?.end ?? candidate.breakout.end,
+          marketTime,
+          data.instrument.market,
+          data.sessions,
+        ),
+    );
   return {
+    kind: 'lifecycle',
+    setupContext:
+      candidate.entry === undefined
+        ? {
+            entryBand: [
+              candidate.level + s * config.minChase * candidate.atr,
+              candidate.level + s * config.maxChase * candidate.atr,
+            ].sort((a, b) => a - b) as [number, number],
+            remainingSessions,
+            totalSessions,
+          }
+        : undefined,
     id: stableId(idea.candidate.id, state, marketTime),
     ideaId: idea.candidate.id,
     instrument: idea.candidate.instrument,
@@ -168,7 +199,7 @@ export function makeEvent(
     marketTime,
     recordedAt: now,
     strategyVersion: idea.candidate.strategyVersion,
-    candidate: structuredClone(idea.candidate),
+    candidate,
     provenance: { ...data.provenance, asOf: marketTime },
     reasons,
     observations,
@@ -188,7 +219,7 @@ export function advance(
   if (terminalStates.has(idea.state)) return { idea, events };
   const emit = (state: State, time: number, reasons: string[], observations?: string[]) => {
     idea.state = state;
-    events.push(makeEvent(idea, state, time, data, now, reasons, observations));
+    events.push(makeEvent(idea, state, time, data, now, reasons, observations, config));
   };
   for (const b of completed(data.intraday, now)) {
     if (b.end <= idea.lastBar || b.end <= c.breakout.end) continue;
