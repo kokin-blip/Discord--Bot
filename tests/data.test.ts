@@ -6,6 +6,66 @@ import { checkDaily, checkIntraday, historyChanged } from '../src/core/quality.j
 import { DAY, QUARTER, weeklyBars } from '../src/core/time.js';
 import { fixture } from './fixtures.js';
 import { equity } from '../src/domain.js';
+import { crypto } from '../src/domain.js';
+import { Coinbase } from '../src/adapters/coinbase.js';
+it('records safe Coinbase rejection details without retaining arbitrary response text', async () => {
+  const store = new Store(':memory:');
+  try {
+    const http = new HttpClient(store, async () =>
+      Response.json(
+        {
+          message: 'granularity too large, maximum 300 candles; private-token',
+        },
+        { status: 400 },
+      ),
+    );
+    const url =
+      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2024-07-28T00:00:00Z&end=2025-05-23T00:00:00Z';
+    await expect(http.json(url)).rejects.toThrow('DATA_HTTP_400');
+    const saved = store.get('coinbase_error', {});
+    expect(saved).toMatchObject({
+      status: 400,
+      reason: 'CANDLE_LIMIT',
+      product: 'BTC-USD',
+      granularity: 86400,
+    });
+    expect(JSON.stringify(saved)).not.toContain('private-token');
+  } finally {
+    store.close();
+  }
+});
+it('paginates Coinbase history within its candle limit and excludes incomplete candles', async () => {
+  const now = Date.parse('2026-10-06T20:06:59Z');
+  const urls: URL[] = [];
+  const http = new HttpClient(
+    undefined,
+    async (input) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      const start = Date.parse(url.searchParams.get('start')!);
+      const end = Date.parse(url.searchParams.get('end')!);
+      const rows = [];
+      for (let t = start; t <= end; t += DAY) rows.push([t / 1000, 9, 11, 10, 10, 100]);
+      return Response.json(rows.reverse());
+    },
+    async () => {},
+  );
+  const rows = (await new Coinbase(http).bars([crypto('BTC-USD')], '1d', now - 800 * DAY, now)).get(
+    crypto('BTC-USD').id,
+  )!;
+  expect(urls).toHaveLength(3);
+  expect(
+    urls.every(
+      (url) =>
+        (Date.parse(url.searchParams.get('end')!) - Date.parse(url.searchParams.get('start')!)) /
+          DAY <=
+        299,
+    ),
+  ).toBe(true);
+  expect(rows).toHaveLength(799);
+  expect(rows.every((b) => b.end <= Math.floor(now / DAY) * DAY)).toBe(true);
+  expect(new Set(rows.map((b) => b.start)).size).toBe(rows.length);
+});
 it('binds the default fetch to the global receiver required by Workers', async () => {
   vi.stubGlobal('fetch', function (this: unknown) {
     if (this !== globalThis) throw new TypeError('Illegal invocation');

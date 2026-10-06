@@ -25,8 +25,48 @@ export class HttpClient {
         continue;
       }
       if (response.ok) return (await response.json()) as T;
-      if (response.status !== 429 && response.status < 500)
+      if (response.status !== 429 && response.status < 500) {
+        const request = new URL(url);
+        if (
+          host === 'api.exchange.coinbase.com' &&
+          /^\/products\/[A-Z0-9.-]+\/candles$/.test(request.pathname)
+        ) {
+          let message = '';
+          try {
+            const body = (await response.json()) as { message?: unknown };
+            if (typeof body.message === 'string') message = body.message.toLowerCase();
+          } catch {
+            /* Non-JSON errors retain an unknown reason. */
+          }
+          const reason = /300|too many|too large|maximum/.test(message)
+            ? 'CANDLE_LIMIT'
+            : /granularity/.test(message)
+              ? 'INVALID_GRANULARITY'
+              : /start|end|time|date/.test(message)
+                ? 'INVALID_TIME_RANGE'
+                : /product|not found/.test(message)
+                  ? 'INVALID_PRODUCT'
+                  : /user.agent/.test(message)
+                    ? 'USER_AGENT_REQUIRED'
+                    : 'UNKNOWN_REJECTION';
+          const time = (key: string) => {
+            const value = request.searchParams.get(key);
+            return value && Number.isFinite(Date.parse(value))
+              ? new Date(value).toISOString()
+              : null;
+          };
+          this.store?.set('coinbase_error', {
+            at: Date.now(),
+            status: response.status,
+            reason,
+            product: request.pathname.split('/')[2],
+            granularity: Number(request.searchParams.get('granularity')),
+            start: time('start'),
+            end: time('end'),
+          });
+        } else await response.body?.cancel();
         throw new Error(`DATA_HTTP_${response.status}:${host}`);
+      }
       const retry = response.headers.get('retry-after');
       const seconds = retry ? Number(retry) : NaN;
       const delay = retry
