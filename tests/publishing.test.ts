@@ -154,7 +154,7 @@ it('retains the public card when chart rendering fails', async () => {
     expect(h.main.send.mock.calls[0][0].files).toEqual([]);
     expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().fields).toContainEqual({
       name: 'Chart',
-      value: 'Chart unavailable; signal details retained.',
+      value: 'Chart unavailable or chart allowance reached; full alert details are shown above.',
     });
   } finally {
     store.close();
@@ -307,3 +307,41 @@ it('renders and delivers a synthetic debug snapshot without market-data access o
     store.close();
   }
 });
+
+it.each(['bullish', 'bearish'] as const)(
+  'delivers %s entries and thread updates without charts when browser or image allowance is exhausted',
+  async (direction) => {
+    for (const limit of ['browser', 'images'] as const) {
+      const store = new Store(':memory:');
+      try {
+        const h = harness(store),
+          e = events(direction);
+        store.saveIdea(e.advanced.idea, [e.watching, ...e.advanced.events]);
+        await h.publisher.deliver(e.watching, 'main');
+        if (limit === 'browser')
+          h.charts.render.mockRejectedValue(new Error('BROWSER_FREE_ALLOWANCE_UNAVAILABLE'));
+        else h.publisher.budget.image = () => false;
+        const entry = e.advanced.events.find((event) => event.state === 'entry_triggered')!;
+        expect(entry).toBeDefined();
+        await h.publisher.deliver(entry, 'main');
+        await h.publisher.deliver(entry, 'main');
+        const payload = h.main.send.mock.calls[1]![0];
+        const embed = payload.embeds[0].toJSON();
+        expect(payload.files).toHaveLength(0);
+        expect(embed.image).toBeUndefined();
+        expect(embed.fields).toEqual(expect.arrayContaining(card(entry).toJSON().fields!));
+        expect(embed.fields).toEqual(
+          expect.arrayContaining([expect.objectContaining({ name: 'Chart' })]),
+        );
+        expect(payload.components).toHaveLength(1);
+        expect(h.main.send).toHaveBeenCalledTimes(2);
+        expect(h.thread.send).toHaveBeenCalledTimes(1);
+        expect(store.receipt(entry.id, 'main')).toBeTruthy();
+        expect(store.receipt(entry.id, 'thread')).toBeTruthy();
+        expect(store.get('budget_paused', false)).toBe(false);
+      } finally {
+        store.close();
+      }
+    }
+  },
+);

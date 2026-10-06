@@ -130,14 +130,19 @@ export class DiscordPublisher implements Publisher {
             if (this.budget.image(Date.now(), rendered.length)) image = rendered;
           }
         } catch {
-          embed.addFields({
-            name: 'Chart',
-            value:
-              event.kind === 'watch_tracker'
-                ? 'Chart unavailable; alert details retained.'
-                : 'Chart unavailable; signal details retained.',
-          });
+          // Chart rendering is optional: browser limits and rendering failures must
+          // never interrupt the public signal or its delivery receipts.
         }
+      if (
+        !image &&
+        event.strategyVersion !== 'system' &&
+        event.strategyVersion !== 'watch-alert-v1'
+      )
+        embed.addFields({
+          name: 'Chart',
+          value:
+            'Chart unavailable or chart allowance reached; full alert details are shown above.',
+        });
       const imageName = event.debug ? `chart-${CHART_STYLE_VERSION}-${event.id}.png` : 'chart.png';
       if (event.debug)
         embed.setFooter({
