@@ -46,9 +46,13 @@ it('announces a requested scan once after all discovery batches finish, includin
       s.pending(now + 300_000).filter((p) => p.event.reasons[0]?.startsWith('Scan complete:'));
     await service.scan(now, true);
     expect(completions()).toHaveLength(0);
+    expect(s.get<{ stage: string }>('scan_progress', { stage: '' }).stage).toBe(
+      'discovery_pending',
+    );
     expect(s.get('scan_announcement', null)).not.toBeNull();
     await service.scan(now + 60_000);
     expect(completions()).toHaveLength(1);
+    expect(s.get<{ stage: string }>('scan_progress', { stage: '' }).stage).toBe('complete');
     expect(completions()[0]?.route).toBe('summaries');
     expect(completions()[0]?.event.reasons[0]).toContain('0 symbols monitored');
     expect(s.get('scan_announcement', null)).toBeNull();

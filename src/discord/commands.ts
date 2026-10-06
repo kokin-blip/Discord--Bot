@@ -313,7 +313,12 @@ export class CommandHandler {
       }
       if (i.commandName === 'status') {
         const monitored = this.store.monitored(),
-          budget = this.budget.status();
+          budget = this.budget.status(),
+          discovery = this.store.get<{
+            market: string;
+            offset: number;
+            listed: Instrument[];
+          } | null>('discovery_progress', null);
         await i.editReply(
           JSON.stringify(
             {
@@ -325,6 +330,14 @@ export class CommandHandler {
               lastErrorStage: this.store.get('last_error_stage', null),
               coinbaseError: this.store.get('coinbase_error', null),
               scanProgress: this.store.get('scan_progress', null),
+              requestedScanPending: this.store.get('scan_announcement', null) !== null,
+              discovery: discovery
+                ? {
+                    market: discovery.market,
+                    processed: discovery.offset,
+                    total: discovery.listed.length,
+                  }
+                : null,
               pendingDeliveries: this.store.pendingCount(),
               activeIdeas: this.store.activeIdeas().length,
               activeEntries: this.store.activeEntries(),

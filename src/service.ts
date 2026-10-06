@@ -161,7 +161,7 @@ export class SignalService {
       const failed = instruments.filter((i) => this.store.get(`quality:${i.id}`, null) !== null);
       if (!failed.length && instruments.length) this.health(now);
       else this.store.set('soak_start', 0);
-      progress('complete');
+      progress(discoveryComplete ? 'complete' : 'discovery_pending');
       if (announcement && discoveryComplete) {
         this.notice(
           now,
