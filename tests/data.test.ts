@@ -8,6 +8,35 @@ import { fixture } from './fixtures.js';
 import { equity } from '../src/domain.js';
 import { crypto } from '../src/domain.js';
 import { Coinbase } from '../src/adapters/coinbase.js';
+it('identifies Coinbase requests with a User-Agent in runtimes that do not supply one', async () => {
+  const paths: string[] = [];
+  const http = new HttpClient(
+    undefined,
+    async (input, init) => {
+      if (!new Headers(init?.headers).get('User-Agent'))
+        return Response.json({ message: 'User-Agent header is required.' }, { status: 400 });
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path === '/products')
+        return Response.json([
+          {
+            id: 'BTC-USD',
+            quote_currency: 'USD',
+            base_currency: 'BTC',
+            status: 'online',
+          },
+        ]);
+      return Response.json([]);
+    },
+    async () => {},
+  );
+  const provider = new Coinbase(http);
+  expect(await provider.discover()).toEqual([crypto('BTC-USD')]);
+  const now = Date.parse('2026-10-06T00:00:00Z');
+  await provider.bars([crypto('BTC-USD')], '1d', now - DAY, now);
+  await provider.bars([crypto('BTC-USD')], '15m', now - QUARTER, now);
+  expect(paths).toEqual(['/products', '/products/BTC-USD/candles', '/products/BTC-USD/candles']);
+});
 it('records safe Coinbase rejection details without retaining arbitrary response text', async () => {
   const store = new Store(':memory:');
   try {

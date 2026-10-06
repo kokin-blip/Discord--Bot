@@ -2,6 +2,7 @@ import type { Bar, Instrument, Interval, MarketDataProvider } from '../domain.js
 import { crypto } from '../domain.js';
 import { DAY, QUARTER } from '../core/time.js';
 import { HttpClient } from './http.js';
+const headers = { 'User-Agent': 'DiscordTradingSignals/0.1', Accept: 'application/json' };
 const stablecoins = new Set([
   'USDC',
   'USDT',
@@ -26,7 +27,7 @@ export class Coinbase implements MarketDataProvider {
         status: string;
         trading_disabled?: boolean;
       }[]
-    >('https://api.exchange.coinbase.com/products');
+    >('https://api.exchange.coinbase.com/products', headers);
     return rows
       .filter(
         (r) =>
@@ -66,7 +67,7 @@ export class Coinbase implements MarketDataProvider {
           start: new Date(from).toISOString(),
           end: new Date(end).toISOString(),
         }).toString();
-        const rows = await this.http.json<number[][]>(u);
+        const rows = await this.http.json<number[][]>(u, headers);
         for (const row of rows) {
           const [seconds, low, high, open, close, volume] = row;
           if (
