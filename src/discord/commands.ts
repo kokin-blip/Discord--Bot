@@ -135,10 +135,26 @@ commands.push(
         .setName('alerts')
         .setDescription('Configure watchlist alerts and optional options context')
         .addBooleanOption((o) =>
-          o.setName('enabled').setDescription('Significant-change alerts').setRequired(true),
+          o
+            .setName('enabled')
+            .setDescription('Master switch for watchlist alerts')
+            .setRequired(true),
         )
         .addBooleanOption((o) =>
           o.setName('options').setDescription('Optional indicative options context'),
+        )
+        .addBooleanOption((o) =>
+          o.setName('volume').setDescription('Daily and 15-minute volume spikes'),
+        )
+        .addBooleanOption((o) =>
+          o.setName('reversals').setDescription('Experimental reversal warnings and follow-ups'),
+        )
+        .addNumberOption((o) =>
+          o
+            .setName('volume_multiplier')
+            .setDescription('Volume versus preceding 10-day average (default 2)')
+            .setMinValue(1)
+            .setMaxValue(100),
         ),
     ),
 );
@@ -278,6 +294,10 @@ export class CommandHandler {
         } else {
           settings.alerts = i.options.getBoolean('enabled', true);
           settings.options = i.options.getBoolean('options') ?? settings.options;
+          settings.volumeSpikes = i.options.getBoolean('volume') ?? settings.volumeSpikes;
+          settings.reversals = i.options.getBoolean('reversals') ?? settings.reversals;
+          settings.volumeMultiplier =
+            i.options.getNumber('volume_multiplier') ?? settings.volumeMultiplier;
         }
         this.store.set('settings', settings);
         await i.editReply(

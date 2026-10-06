@@ -33,3 +33,9 @@ Production remains unavailable without current seven-day health, administrator h
 ## Known acceptance gaps requiring live evidence
 
 Thirty diverse real historical examples have not yet been supplied/reviewed. The seven-day soak has not run. Cloudflare account-wide free eligibility, deployed resource usage/provider connectivity, and actual Discord permission/card/thread behavior are not established by local mocks. Preserve test mode until these checks pass.
+
+## Watch tracker validation
+
+Local tests cover ten-day daily and matching-slot intraday baselines, exact equality at 2×, missing/zero samples, UTC boundaries, session offsets spanning DST, holidays and early closes. Mirrored reversal tests cover confirmed pivots known before warning open, warning/confirmation/cancellation/expiry, fifth-candle confirmation, cancellation precedence and frozen levels. Persistence tests cover restart deduplication, silent initial/recovery reconstruction, disabled/re-enabled trackers, independent timeframe cooldowns, long outages and atomic rollback. Publisher tests verify receipts/retries, TradingView links, no strategy entries or R/R fields, no threads and no chart rendering.
+
+Generated sample text cards have been visually inspected locally (`output/tracker-cards-preview.png`, ignored from Git). This is a layout preview, not proof of live Discord delivery. Inspect qualifying cards in the configured private test channel before normal-channel release; no synthetic market alerts are posted by the implementation. Buying/selling labels are candle-direction pressure estimates, not actual aggressor-side volume.

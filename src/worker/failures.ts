@@ -5,6 +5,7 @@ export type FailureStage =
   | 'budget'
   | 'discord_identity'
   | 'discord_guild'
+  | 'command_registration'
   | 'command'
   | 'scan'
   | 'publication';
@@ -13,6 +14,7 @@ const stages: FailureStage[] = [
   'budget',
   'discord_identity',
   'discord_guild',
+  'command_registration',
   'command',
   'scan',
   'publication',

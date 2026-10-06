@@ -3,10 +3,11 @@ import { terminalStates } from './domain.js';
 import type { Store } from './sql-store.js';
 import { DataService } from './data.js';
 import { advance, detect, makeEvent, rank, stableId, pivotLevels } from './core/strategy.js';
-import { atr, mean } from './core/indicators.js';
+import { atr } from './core/indicators.js';
 import { checkIntraday } from './core/quality.js';
 import { DAY, QUARTER, utcDate } from './core/time.js';
 import { diagnosticCode } from './core/errors.js';
+import { trackWatchlist } from './watch-trackers.js';
 export class SignalService {
   running = false;
   constructor(
@@ -139,6 +140,7 @@ export class SignalService {
               this.store.saveIdea(result.idea, [snapshot]);
             }
           }
+          trackWatchlist(this.store, dataset, now, recovery);
           if (this.store.settings().alerts && !recovery) this.alerts(dataset, now);
           this.store.set(`quality:${i.id}`, null);
           this.store.set(
@@ -148,6 +150,8 @@ export class SignalService {
         } catch (e) {
           this.quality(i, e);
           if (e instanceof Error && e.message === 'HISTORY_REVISED_REFRESH_REQUIRED') {
+            for (const timeframe of ['1d', '15m'])
+              this.store.set(`tracker:v1:${i.id}:${timeframe}`, null);
             for (const old of this.store
               .activeIdeas()
               .filter((x) => x.candidate.instrument.id === i.id)) {
@@ -258,7 +262,6 @@ export class SignalService {
       a = atr(prior, this.store.strategy().atrPeriod),
       previous = prior.at(-1)!;
     const tests: [string, boolean][] = [
-      ['unusual_volume', b.volume >= 2 * mean(prior.slice(-20).map((x) => x.volume))],
       ['large_daily_move', Math.abs(b.close - previous.close) >= 2 * a],
     ];
     const recent = data.intraday.filter(

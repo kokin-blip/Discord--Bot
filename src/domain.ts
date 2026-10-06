@@ -74,7 +74,8 @@ export interface Candidate {
   reasons: string[];
 }
 export interface SignalEvent {
-  kind?: 'lifecycle' | 'setup_snapshot';
+  kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker';
+  tracker?: TrackerDetails;
   setupContext?: { entryBand: [number, number]; remainingSessions: number; totalSessions: number };
   id: string;
   ideaId: string;
@@ -135,3 +136,32 @@ export const crypto = (symbol: string): Instrument => ({
 });
 export const benchmarkFor = (i: Instrument): Instrument =>
   i.market === 'crypto' ? crypto('BTC-USD') : equity(i.symbol === 'SPY' ? 'QQQ' : 'SPY');
+
+export type TrackerDetails =
+  | {
+      type: 'volume';
+      pressure: 'buying' | 'selling' | 'neutral';
+      pressureBasis: 'candle_direction';
+      timeframe: Interval;
+      volume: number;
+      baseline: number;
+      relativeVolume: number;
+      close: number;
+      priceChange: number;
+      priceChangePercent: number;
+      baselineDays: number;
+      multiplier: number;
+    }
+  | {
+      type: 'reversal';
+      timeframe: Interval;
+      phase: 'warning' | 'confirmed' | 'cancelled' | 'expired';
+      warningId: string;
+      warningTime: number;
+      frozenHigh: number;
+      frozenLow: number;
+      cancellationLevel: number;
+      elapsed: number;
+      confirmationBars: number;
+      close: number;
+    };

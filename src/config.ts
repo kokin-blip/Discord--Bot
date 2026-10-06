@@ -41,10 +41,16 @@ export interface Settings {
   channels: Partial<Record<Route, string>>;
   alerts: boolean;
   options: boolean;
+  volumeSpikes: boolean;
+  reversals: boolean;
+  volumeMultiplier: number;
 }
 export const initialSettings: Settings = {
   paused: false,
   channels: {},
   alerts: true,
   options: true,
+  volumeSpikes: true,
+  reversals: true,
+  volumeMultiplier: 2,
 };

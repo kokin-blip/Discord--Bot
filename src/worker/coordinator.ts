@@ -21,6 +21,7 @@ import { SignalService } from '../service.js';
 import { DiscordPublisher } from '../discord/publisher.js';
 import { CommandHandler } from '../discord/commands.js';
 import { routes } from '../config.js';
+import { syncCommands } from '../discord/registration.js';
 import { diagnosticCode } from '../core/errors.js';
 import { activationIssues } from './activation.js';
 import { failureResponse, type FailureStage } from './failures.js';
@@ -105,6 +106,8 @@ export class SignalCoordinator {
       if (this.busy) return new Response('Already running');
       this.busy = true;
       try {
+        stage = 'command_registration';
+        await syncCommands(this.store, this.client.rest, this.env.DISCORD_APPLICATION_ID);
         const now = Date.now(),
           day = new Date(now).toISOString().slice(0, 10),
           force = this.store.get('scan_requested', false);

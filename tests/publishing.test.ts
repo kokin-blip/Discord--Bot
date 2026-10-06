@@ -204,3 +204,34 @@ it('recovers an existing Discord thread after its cache and saved thread ID are 
     store.close();
   }
 });
+
+it('publishes tracker text cards with receipts and links, without charts, threads or entry geometry', async () => {
+  const { trackerEvent } = await import('../src/watch-trackers.js');
+  const { volumeSpike } = await import('../src/core/trackers.js');
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      d = fixture();
+    const daily = d.daily.at(-1)!;
+    const volume = volumeSpike(d, '1d', { ...daily, volume: 1e12 }, 2, 10)!;
+    const event = trackerEvent(d, volume, daily.end);
+    store.enqueue(event, 'watchlist');
+    h.main.send.mockRejectedValueOnce(new Error('Unavailable'));
+    await expect(h.publisher.deliver(event, 'main')).rejects.toThrow('Unavailable');
+    await h.publisher.deliver(event, 'main');
+    await h.publisher.deliver(event, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(2);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(h.thread.send).not.toHaveBeenCalled();
+    const payload = h.main.send.mock.calls[1][0];
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.title).toContain('VOLUME SPIKE');
+    expect(embed.fields.some((f: any) => /reward|entry|target/i.test(f.name))).toBe(false);
+    expect(payload.files).toEqual([]);
+    expect(payload.components[0].toJSON().components[0].url).toContain('tradingview.com');
+    expect(store.receipt(event.id, 'main')).toBeDefined();
+    expect(store.thread(event.ideaId)).toBeUndefined();
+  } finally {
+    store.close();
+  }
+});

@@ -105,3 +105,79 @@ export function buttons(e: SignalEvent) {
       .setURL(tradingView(e.instrument.symbol, e.instrument.market)),
   );
 }
+
+export function trackerCard(e: SignalEvent): EmbedBuilder {
+  const t = e.tracker;
+  if (!t) throw new Error('MISSING_TRACKER_DETAILS');
+  const timeframe = t.timeframe === '1d' ? 'Daily' : '15-minute';
+  const embed = new EmbedBuilder()
+    .setColor(
+      t.type === 'volume'
+        ? t.pressure === 'neutral'
+          ? 0x87939d
+          : t.pressure === 'buying'
+            ? 0x22c6a8
+            : 0xe9b35d
+        : e.direction === 'bullish'
+          ? 0x22c6a8
+          : 0xe9b35d,
+    )
+    .setTitle(
+      `${e.instrument.symbol} · ${timeframe} · ${t.type === 'volume' ? `${t.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${e.direction.toUpperCase()} REVERSAL ${t.phase.toUpperCase()}`}`,
+    )
+    .setDescription(
+      t.type === 'volume'
+        ? 'Unusual market activity; this is not a trade entry signal. Pressure is estimated from candle direction, not measured buyer/seller volume.'
+        : 'Experimental market-structure tracker; separate from the breakout strategy. This is not a trade entry signal.',
+    )
+    .addFields({ name: 'Closing price', value: price(t.close), inline: true });
+  if (t.type === 'volume')
+    embed.addFields(
+      {
+        name: 'Estimated volume pressure',
+        value: `${t.pressure} · candle ${t.pressure === 'buying' ? 'closed above its open' : t.pressure === 'selling' ? 'closed below its open' : 'closed at its open'}. Total volume; no aggressor-side breakdown.`,
+      },
+      { name: 'Observed volume', value: price(t.volume), inline: true },
+      {
+        name: `${t.baselineDays}-day baseline`,
+        value: `${price(t.baseline)}${t.timeframe === '15m' ? ' · matching session time slot' : ' · prior completed daily candles'}`,
+        inline: true,
+      },
+      {
+        name: 'Relative volume',
+        value: `${t.relativeVolume.toFixed(2)}× (threshold ${t.multiplier}×)`,
+        inline: true,
+      },
+      {
+        name: 'Price change from previous close',
+        value: `${t.priceChange >= 0 ? '+' : ''}${price(t.priceChange)} (${t.priceChangePercent.toFixed(2)}%)`,
+        inline: true,
+      },
+    );
+  else
+    embed.addFields(
+      {
+        name: 'Frozen swing levels',
+        value: `Low ${price(t.frozenLow)} · High ${price(t.frozenHigh)}`,
+      },
+      {
+        name: 'Confirmation condition',
+        value: `Later completed ${timeframe.toLowerCase()} close ${e.direction === 'bullish' ? 'above' : 'below'} ${price(e.direction === 'bullish' ? t.frozenHigh : t.frozenLow)} within ${t.confirmationBars} candles`,
+      },
+      {
+        name: 'Cancellation condition',
+        value: `Completed close ${e.direction === 'bullish' ? 'below' : 'above'} ${price(t.cancellationLevel)}; cancellation takes precedence`,
+      },
+      {
+        name: 'Warning correlation',
+        value: `${t.warningId} · ${new Date(t.warningTime).toISOString()} · ${t.elapsed}/${t.confirmationBars} candles elapsed`,
+      },
+    );
+  return embed
+    .addFields({
+      name: 'Data',
+      value: `${e.provenance.provider} / ${e.provenance.feed}\n${new Date(e.marketTime).toISOString()}\nAge at display: ${Math.max(0, (Date.now() - e.marketTime) / 60000).toFixed(0)}m · feed minimum ${e.provenance.delayMinutes}m`,
+    })
+    .setTimestamp(e.marketTime)
+    .setFooter({ text: `${e.strategyVersion} · event ${e.id}` });
+}

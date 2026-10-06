@@ -22,6 +22,7 @@ export interface SqlDatabase {
   };
 }
 export class Store {
+  private transactionDepth = 0;
   constructor(readonly db: SqlDatabase) {
     this.db.exec(`${this.db.mode === 'cloud' ? '' : 'PRAGMA foreign_keys=ON;'}
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -43,15 +44,21 @@ export class Store {
     this.db.close();
   }
   transaction<T>(fn: () => T): T {
-    if (this.db.transaction) return this.db.transaction(fn);
-    this.db.exec('BEGIN IMMEDIATE');
+    if (this.transactionDepth) return fn();
+    this.transactionDepth++;
     try {
-      const result = fn();
-      this.db.exec('COMMIT');
-      return result;
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
+      if (this.db.transaction) return this.db.transaction(fn);
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = fn();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (e) {
+        this.db.exec('ROLLBACK');
+        throw e;
+      }
+    } finally {
+      this.transactionDepth--;
     }
   }
   get<T>(key: string, fallback: T): T {
@@ -64,7 +71,7 @@ export class Store {
       .run(key, JSON.stringify(value));
   }
   settings(): Settings {
-    return this.get('settings', structuredClone(initialSettings));
+    return { ...structuredClone(initialSettings), ...this.get<Partial<Settings>>('settings', {}) };
   }
   strategy(): StrategyConfig {
     return strategySchema.parse(this.get('strategy', defaults));

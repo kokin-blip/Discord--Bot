@@ -10,7 +10,7 @@ import type { Dataset, OptionsContext, Publisher, SignalEvent } from '../domain.
 import type { Store } from '../sql-store.js';
 import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
-import { buttons, card } from './cards.js';
+import { buttons, card, trackerCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
 export class DiscordPublisher implements Publisher {
   constructor(
@@ -62,9 +62,11 @@ export class DiscordPublisher implements Publisher {
         );
     if (!message) {
       let dataset: Dataset | undefined;
-      try {
-        dataset = await this.data.dataset(event.instrument, event.recordedAt);
-      } catch {}
+      if (event.kind !== 'watch_tracker') {
+        try {
+          dataset = await this.data.dataset(event.instrument, event.recordedAt);
+        } catch {}
+      }
       let options: OptionsContext[] = [];
       if (
         event.instrument.market === 'equity' &&
@@ -76,20 +78,22 @@ export class DiscordPublisher implements Publisher {
         } catch {}
       }
       const embed =
-        event.strategyVersion === 'system'
-          ? new EmbedBuilder()
-              .setTitle('Bot update')
-              .setDescription(event.reasons.join('\n'))
-              .setFooter({ text: `event ${event.id}` })
-          : event.strategyVersion === 'watch-alert-v1'
+        event.kind === 'watch_tracker'
+          ? trackerCard(event)
+          : event.strategyVersion === 'system'
             ? new EmbedBuilder()
-                .setTitle(`${event.instrument.symbol} · Watchlist change`)
-                .setDescription(
-                  `${event.reasons.join('\n')}\n${event.provenance.feed} · data ${new Date(event.marketTime).toISOString()} · ${Math.max(0, (Date.now() - event.marketTime) / 60000).toFixed(0)}m old (feed minimum ${event.provenance.delayMinutes}m)`,
-                )
-                .setTimestamp(event.marketTime)
+                .setTitle('Bot update')
+                .setDescription(event.reasons.join('\n'))
                 .setFooter({ text: `event ${event.id}` })
-            : card(event, options);
+            : event.strategyVersion === 'watch-alert-v1'
+              ? new EmbedBuilder()
+                  .setTitle(`${event.instrument.symbol} · Watchlist change`)
+                  .setDescription(
+                    `${event.reasons.join('\n')}\n${event.provenance.feed} · data ${new Date(event.marketTime).toISOString()} · ${Math.max(0, (Date.now() - event.marketTime) / 60000).toFixed(0)}m old (feed minimum ${event.provenance.delayMinutes}m)`,
+                  )
+                  .setTimestamp(event.marketTime)
+                  .setFooter({ text: `event ${event.id}` })
+              : card(event, options);
       let image: Buffer | undefined;
       if (
         dataset &&

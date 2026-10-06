@@ -30,7 +30,7 @@ Copy `.env.example` to `.env` for registration/preflight tools and `.dev.vars.ex
 | `/status`                        | Scan timestamps, instrument freshness/quality, outbox, pause and budget state |
 | `/config channels`               | Six publishing routes; optional manager role                                  |
 | `/config strategy`               | Validated numeric threshold changes with immutable strategy versions          |
-| `/config alerts`                 | Significant-change alerts and optional indicative options context             |
+| `/config alerts`                 | Master alert switch, volume/reversal toggles, multiplier, and options context |
 | `/config validation`             | Administrator attestation after reviewing real historical examples            |
 | `/pause`, `/resume`              | Pause/resume shared scans and publication within resource limits              |
 
@@ -41,6 +41,10 @@ All members can inspect; administrators or the configured manager role change sh
 Watched symbols automatically publish qualified breakouts, daily retest readiness, and confirmed entries to their equity/crypto ideas channel. Each idea has one discussion thread; later cards stay visible in the main channel and their details are mirrored into the thread. Milestones and terminal outcomes use the updates channel. Before entry, cards and charts label the 0.5-ATR ranking reference, targets, and R/R as hypothetical; the actual retest trigger, allowed entry band, and remaining session window are separate. At entry, levels are finalized from the confirming close, which is a signal reference rather than a fill.
 
 Initial monitoring and recovery can publish one current snapshot of a still-valid pre-entry setup that has never been announced. Historical entries remain suppressed. Per-destination delivery receipts prevent successful messages from being repeated when a thread mirror fails and retries. No manual `/scan` is needed for automatic strategy alerts. Test mode retains all publishing in the configured test channel.
+
+Watchlist trackers run automatically on both daily and 15-minute candles. Volume spikes compare total volume against the preceding **10-day average** (matching session slots for intraday bars), defaulting to 2×. Cards differentiate buying, selling, and neutral pressure using close versus open, explicitly labeled as an estimate rather than measured buyer/seller volume. Reversal warnings freeze confirmed swing levels, then publish confirmation, cancellation, or expiry within five later completed candles. These text-only alerts use the watchlist route, preserve test-mode routing, and never create entries or change strategy levels.
+
+Use `/config alerts enabled:true volume:true reversals:true volume_multiplier:2` to configure trackers. Both are enabled by default, including on older installations. Initial warm-up, recovery, and disabled periods advance state silently without replaying historical alerts. [Tracker rules](docs/STRATEGY.md#experimental-watchlist-trackers--watch-tracker-v1) describe the experimental reversal interpretation.
 
 Daily discovery advances in bounded batches across active listings and retains the 300 most liquid eligible equities and 50 crypto pairs. Qualifying candidates are ranked deterministically; up to 10 become the automatic watchlist. Monitoring runs every five minutes, using at least 16-minute-old consolidated equity data. Market calendars account for holidays, early closes, and New York daylight saving time; crypto days/weeks use UTC/Monday.
 
