@@ -59,6 +59,7 @@ export class HttpClient {
             at: Date.now(),
             status: response.status,
             reason,
+            userAgentAttached: !!new Headers(headers).get('User-Agent'),
             product: request.pathname.split('/')[2],
             granularity: Number(request.searchParams.get('granularity')),
             start: time('start'),

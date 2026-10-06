@@ -161,6 +161,7 @@ export class CommandHandler {
     readonly budget: { image(now: number, bytes: number): boolean; status(): { paused: boolean } },
     readonly guildId: string,
     readonly requestScan?: () => void,
+    readonly runtimeVersion = 'development',
   ) {}
   async handle(i: ChatInputCommandInteraction) {
     if (i.guildId !== this.guildId) {
@@ -316,6 +317,7 @@ export class CommandHandler {
         await i.editReply(
           JSON.stringify(
             {
+              runtimeVersion: this.runtimeVersion,
               paused: this.store.settings().paused,
               running: this.service.running,
               lastScan: this.store.get('last_scan', null),

@@ -65,6 +65,7 @@ export class SignalCoordinator {
       this.budget,
       env.DISCORD_GUILD_ID,
       () => this.store.set('scan_requested', true),
+      env.BUILD_INFO?.id ?? 'unknown',
     );
   }
   private configured() {

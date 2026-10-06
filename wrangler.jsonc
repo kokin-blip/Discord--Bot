@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "keep_vars": true,
+  "version_metadata": { "binding": "BUILD_INFO" },
   "triggers": { "crons": ["* * * * *"] },
   "durable_objects": { "bindings": [{ "name": "SIGNALS", "class_name": "SignalCoordinator" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SignalCoordinator"] }],

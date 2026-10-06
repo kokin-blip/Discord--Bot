@@ -37,32 +37,38 @@ it('identifies Coinbase requests with a User-Agent in runtimes that do not suppl
   await provider.bars([crypto('BTC-USD')], '15m', now - QUARTER, now);
   expect(paths).toEqual(['/products', '/products/BTC-USD/candles', '/products/BTC-USD/candles']);
 });
-it('records safe Coinbase rejection details without retaining arbitrary response text', async () => {
-  const store = new Store(':memory:');
-  try {
-    const http = new HttpClient(store, async () =>
-      Response.json(
-        {
-          message: 'granularity too large, maximum 300 candles; private-token',
-        },
-        { status: 400 },
-      ),
-    );
-    const url =
-      'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2024-07-28T00:00:00Z&end=2025-05-23T00:00:00Z';
-    await expect(http.json(url)).rejects.toThrow('DATA_HTTP_400');
-    const saved = store.get('coinbase_error', {});
-    expect(saved).toMatchObject({
-      status: 400,
-      reason: 'CANDLE_LIMIT',
-      product: 'BTC-USD',
-      granularity: 86400,
-    });
-    expect(JSON.stringify(saved)).not.toContain('private-token');
-  } finally {
-    store.close();
-  }
-});
+it.each([false, true])(
+  'records safe Coinbase rejection details with User-Agent attached=%s',
+  async (attached) => {
+    const store = new Store(':memory:');
+    try {
+      const http = new HttpClient(store, async () =>
+        Response.json(
+          {
+            message: 'granularity too large, maximum 300 candles; private-token',
+          },
+          { status: 400 },
+        ),
+      );
+      const url =
+        'https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2024-07-28T00:00:00Z&end=2025-05-23T00:00:00Z';
+      await expect(
+        http.json(url, attached ? { 'User-Agent': 'DiscordTradingSignals/0.1' } : {}),
+      ).rejects.toThrow('DATA_HTTP_400');
+      const saved = store.get('coinbase_error', {});
+      expect(saved).toMatchObject({
+        status: 400,
+        reason: 'CANDLE_LIMIT',
+        userAgentAttached: attached,
+        product: 'BTC-USD',
+        granularity: 86400,
+      });
+      expect(JSON.stringify(saved)).not.toContain('private-token');
+    } finally {
+      store.close();
+    }
+  },
+);
 it('paginates Coinbase history within its candle limit and excludes incomplete candles', async () => {
   const now = Date.parse('2026-10-06T20:06:59Z');
   const urls: URL[] = [];

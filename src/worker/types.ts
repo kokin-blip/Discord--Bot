@@ -1,5 +1,6 @@
 import type { DurableObjectNamespace, Fetcher } from '@cloudflare/workers-types';
 export interface Env {
+  BUILD_INFO?: { id: string; tag: string; timestamp: string };
   SIGNALS: DurableObjectNamespace;
   BROWSER: Fetcher;
   DISCORD_TOKEN: string;
