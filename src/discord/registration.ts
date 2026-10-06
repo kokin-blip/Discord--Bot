@@ -14,4 +14,8 @@ export async function syncCommands(
   if (store.get('command_registration', '') === version) return;
   await rest.put(Routes.applicationCommands(applicationId), { body });
   store.set('command_registration', version);
+  store.set('command_registration_details', {
+    at: Date.now(),
+    names: commands.map((c) => c.toJSON().name),
+  });
 }

@@ -425,6 +425,10 @@ export class CommandHandler {
           JSON.stringify(
             {
               runtimeVersion: this.runtimeVersion,
+              commandRegistration: {
+                ...this.store.get<object>('command_registration_details', {}),
+                error: this.store.get('command_registration_error', null),
+              },
               paused: this.store.settings().paused,
               running: this.service.running,
               lastScan: this.store.get('last_scan', null),

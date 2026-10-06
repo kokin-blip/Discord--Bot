@@ -11,6 +11,9 @@ it('syncs global server commands once, including tracker controls, and retries a
     await syncCommands(store, rest, 'application');
     await syncCommands(store, rest, 'application');
     expect(rest.put).toHaveBeenCalledTimes(2);
+    expect(store.get('command_registration_details', {})).toMatchObject({
+      names: expect.arrayContaining(['debug']),
+    });
     const calls = rest.put.mock.calls as unknown as [string, { body: any[] }][];
     expect(calls[1]![0]).toBe('/applications/application/commands');
     const body = calls[1]![1].body;

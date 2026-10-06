@@ -90,6 +90,14 @@ export class SignalCoordinator {
       stage = 'discord_guild';
       await this.client.guilds.fetch({ guild: this.env.DISCORD_GUILD_ID, force: true });
       if (path === '/command') {
+        // Existing commands can refresh Discord definitions even without a scheduler tick.
+        // Keep diagnostics usable if registration itself fails.
+        try {
+          await syncCommands(this.store, this.client.rest, this.env.DISCORD_APPLICATION_ID);
+          this.store.set('command_registration_error', null);
+        } catch (error) {
+          this.store.set('command_registration_error', diagnosticCode(error));
+        }
         stage = 'command';
         const raw = (await request.json()) as APIChatInputApplicationCommandInteraction;
         // The public Worker has already verified the signature and returned the deferred response.
@@ -109,7 +117,13 @@ export class SignalCoordinator {
       this.busy = true;
       try {
         stage = 'command_registration';
-        await syncCommands(this.store, this.client.rest, this.env.DISCORD_APPLICATION_ID);
+        try {
+          await syncCommands(this.store, this.client.rest, this.env.DISCORD_APPLICATION_ID);
+          this.store.set('command_registration_error', null);
+        } catch (error) {
+          this.store.set('command_registration_error', diagnosticCode(error));
+          throw error;
+        }
         const now = Date.now(),
           day = new Date(now).toISOString().slice(0, 10),
           force = this.store.get('scan_requested', false);
