@@ -101,9 +101,20 @@ export class DataService {
             this.store.get(`history_changed:${i.id}`, false) ||
             this.store.get(`daily_refresh:${i.id}`, '') !== stamp),
       );
-      for (let offset = 0; offset < due.length; offset += 50) {
-        const group = due.slice(offset, offset + 50),
-          fetched = await provider.bars(group, '1d', now - 800 * DAY, now);
+      const batchSize = market === 'crypto' ? 1 : 50;
+      for (let offset = 0; offset < due.length; offset += batchSize) {
+        const group = due.slice(offset, offset + batchSize);
+        const first = group[0]!;
+        const cached = this.store.bars(first, '1d');
+        // Save each crypto product before fetching the next. Refresh overlapping recent
+        // bars after warm-up; rebuilding 800 days on every forced scan wastes requests.
+        const start =
+          market === 'crypto' &&
+          cached.length >= 252 &&
+          !this.store.get(`history_changed:${first.id}`, false)
+            ? Math.max(now - 800 * DAY, cached.at(-1)!.start - 7 * DAY)
+            : now - 800 * DAY;
+        const fetched = await provider.bars(group, '1d', start, now);
         for (const i of group) {
           const bars = fetched.get(i.id) ?? [];
           const changed = historyChanged(this.store.bars(i, '1d'), bars);

@@ -352,7 +352,16 @@ export class CommandHandler {
               lastScan: this.store.get('last_scan', null),
               lastError: this.store.get('last_error', null),
               lastErrorStage: this.store.get('last_error_stage', null),
-              coinbaseError: this.store.get('coinbase_error', null),
+              coinbaseError:
+                (this.store.get<{ at: number } | null>('coinbase_error', null)?.at ?? 0) >
+                this.store.get('last_scan', 0)
+                  ? this.store.get('coinbase_error', null)
+                  : null,
+              discoveryError: this.store.get('discovery_error', null),
+              coinbaseRetryAt:
+                Math.max(0, this.store.get('retry_after:api.exchange.coinbase.com', 0)) > Date.now()
+                  ? this.store.get('retry_after:api.exchange.coinbase.com', 0)
+                  : null,
               scanProgress: this.store.get('scan_progress', null),
               requestedScanPending: this.store.get('scan_announcement', null) !== null,
               discovery: discovery

@@ -208,3 +208,50 @@ it('does not snapshot invalidated setups or instruments failing data quality', a
     }
   }
 });
+
+it('evaluates refreshed watchlists and keeps requested discovery pending after discovery history is rate-limited', async () => {
+  const s = new Store(':memory:');
+  try {
+    const d = fixture();
+    d.instrument = equity('TEST');
+    d.provenance.delayMinutes = 16;
+    d.sessions = [
+      {
+        date: utcDate(d.intraday[0]!.start),
+        open: d.intraday[0]!.start,
+        close: d.intraday[0]!.end,
+      },
+    ];
+    const now = d.provenance.asOf + 16 * 60_000;
+    s.saveIdea(idea(d), [], false);
+    s.pin(d.instrument);
+    s.set('last_scan', now - 60000);
+    s.set('scan_announcement', { id: 'waiting-discovery', requestedAt: now });
+    const order: string[] = [];
+    const data = {
+      universe: async () => [equity('POOL')],
+      refreshDaily: async (list: any[]) => {
+        if (list.some((i) => i.symbol === 'POOL')) {
+          order.push('discovery');
+          throw new Error('DATA_HTTP_429:api.exchange.coinbase.com');
+        }
+        order.push('watchlist-daily');
+      },
+      refreshIntraday: async (list: any[]) => {
+        if (list.length) order.push('watchlist-intraday');
+      },
+      dataset: async () => d,
+    } as unknown as DataService;
+    await new SignalService(s, data).scan(now);
+    expect(order.indexOf('watchlist-intraday')).toBeLessThan(order.indexOf('discovery'));
+    expect(s.get('last_scan', 0)).toBe(now);
+    expect(s.get('discovery_error', null)).toBe('DATA_HTTP_429:api.exchange.coinbase.com');
+    expect(s.get('scan_announcement', null)).not.toBeNull();
+    expect(s.get<{ stage: string }>('scan_progress', { stage: '' }).stage).toBe(
+      'discovery_pending',
+    );
+    expect(s.pending(now).some((p) => p.event.state === 'entry_triggered')).toBe(true);
+  } finally {
+    s.close();
+  }
+});

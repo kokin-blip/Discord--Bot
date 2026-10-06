@@ -227,3 +227,64 @@ it('persists long Retry-After instructions without retrying prematurely', async 
     store.close();
   }
 });
+
+it('persists a cooldown after exhausted 429 retries across HTTP client restarts', async () => {
+  const store = new Store(':memory:');
+  let requests = 0;
+  const fetcher = async () => {
+    requests++;
+    return new Response('', { status: 429 });
+  };
+  try {
+    const client = new HttpClient(store, fetcher, async () => {});
+    await expect(client.json('https://api.exchange.coinbase.com/products')).rejects.toThrow(
+      'DATA_HTTP_429',
+    );
+    expect(requests).toBe(5);
+    expect(store.get('retry_after:api.exchange.coinbase.com', 0)).toBeGreaterThan(Date.now());
+    await expect(
+      new HttpClient(store, fetcher, async () => {}).json(
+        'https://api.exchange.coinbase.com/products',
+      ),
+    ).rejects.toThrow('PROVIDER_RETRY_LATER');
+    expect(requests).toBe(5);
+  } finally {
+    store.close();
+  }
+});
+it('saves each crypto daily history before another product fails and refreshes cached bars incrementally', async () => {
+  const { DataService } = await import('../src/data.js');
+  const store = new Store(':memory:');
+  const now = Date.parse('2026-10-06T20:00:00Z'),
+    btc = crypto('BTC-USD'),
+    eth = crypto('ETH-USD');
+  const calls: { symbols: string[]; start: number }[] = [];
+  let fail = true;
+  const provider = {
+    calendar: async () => [],
+    discover: async () => [],
+    bars: async (instruments: (typeof btc)[], _interval: string, start: number) => {
+      calls.push({ symbols: instruments.map((i) => i.symbol), start });
+      if (fail && instruments[0]?.id === eth.id)
+        throw new Error('DATA_HTTP_429:api.exchange.coinbase.com');
+      const rows = Array.from({ length: 799 }, (_, n) => {
+        const t = Math.floor(now / DAY) * DAY - (799 - n) * DAY;
+        return { start: t, end: t + DAY, open: 100, high: 101, low: 99, close: 100, volume: 100 };
+      });
+      return new Map(instruments.map((i) => [i.id, rows]));
+    },
+  };
+  try {
+    const data = new DataService(store, provider, provider);
+    await expect(data.refreshDaily([btc, eth], now)).rejects.toThrow('DATA_HTTP_429');
+    expect(store.bars(btc, '1d')).toHaveLength(799);
+    const savedCalls = calls.length;
+    fail = false;
+    await data.refreshDaily([btc, eth], now);
+    expect(calls.slice(savedCalls).map((c) => c.symbols)).toEqual([['ETH-USD']]);
+    await data.refreshDaily([btc], now, true);
+    expect(calls.at(-1)!.start).toBeGreaterThan(now - 10 * DAY);
+  } finally {
+    store.close();
+  }
+});

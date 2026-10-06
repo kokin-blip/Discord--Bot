@@ -27,11 +27,35 @@ export class SignalService {
     const progress = (stage: string) => this.store.set('scan_progress', { stage, at: Date.now() });
     try {
       progress('discovery');
-      const newDay = this.store.get('discovery_day', '') !== utcDate(now),
-        pool = newDay || force || announcement ? await this.data.universe(now) : [];
-      const discoveryComplete = this.store.get('discovery_progress', null) === null;
+      let discoveryFailed = false;
+      const discoveryFailure = (error: unknown) => {
+        if (!this.store.monitored().length) throw error;
+        discoveryFailed = true;
+        this.store.set('discovery_error', diagnosticCode(error));
+      };
+      const newDay = this.store.get('discovery_day', '') !== utcDate(now);
+      const pool =
+        newDay || force || announcement
+          ? await this.data.universe(now).catch((error) => {
+              discoveryFailure(error);
+              return [];
+            })
+          : [];
       progress('daily_history');
-      await this.data.refreshDaily([...pool, ...this.store.monitored()], now, force);
+      // Current watchlists take precedence over discovery history downloads.
+      const refreshedMonitored = this.store.monitored();
+      await this.data.refreshDaily(refreshedMonitored, now, force);
+      progress('intraday_history');
+      await this.data.refreshIntraday(refreshedMonitored, now);
+      progress('daily_history');
+      try {
+        await this.data.refreshDaily(pool, now);
+      } catch (error) {
+        discoveryFailure(error);
+      }
+      const discoveryComplete =
+        !discoveryFailed && this.store.get('discovery_progress', null) === null;
+      if (!discoveryFailed) this.store.set('discovery_error', null);
       const config = this.store.strategy(),
         candidates: Candidate[] = [];
       for (const i of pool) {
@@ -51,10 +75,12 @@ export class SignalService {
       await this.data.refreshDaily(
         instruments.filter((i) => !pool.some((p) => p.id === i.id)),
         now,
-        force,
       );
       progress('intraday_history');
-      await this.data.refreshIntraday(instruments, now);
+      await this.data.refreshIntraday(
+        instruments.filter((i) => !refreshedMonitored.some((r) => r.id === i.id)),
+        now,
+      );
       progress('strategy_evaluation');
       let recovered = 0;
       for (const i of instruments) {

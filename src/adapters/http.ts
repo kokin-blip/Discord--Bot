@@ -8,14 +8,18 @@ export class HttpClient {
   ) {}
   async json<T>(url: URL | string, headers: Record<string, string> = {}): Promise<T> {
     const host = new URL(url).hostname,
-      minGap = host.includes('coinbase') ? 400 : 350;
+      minGap = host.includes('coinbase') ? 1000 : 350;
     for (let attempt = 0; attempt < 5; attempt++) {
       if (this.store?.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
       const blocked = this.store?.get(`retry_after:${host}`, 0) ?? 0;
       if (blocked > Date.now()) throw new Error('PROVIDER_RETRY_LATER');
-      const wait = minGap - (Date.now() - (this.last.get(host) ?? 0));
+      const wait =
+        minGap -
+        (Date.now() -
+          Math.max(this.last.get(host) ?? 0, this.store?.get(`request_at:${host}`, 0) ?? 0));
       if (wait > 0) await this.sleep(wait);
       this.last.set(host, Date.now());
+      this.store?.set(`request_at:${host}`, Date.now());
       let response: Response;
       try {
         response = await this.fetcher(url, { headers, signal: AbortSignal.timeout(20_000) });
@@ -81,7 +85,11 @@ export class HttpClient {
         this.store?.set(`retry_after:${host}`, Date.now() + remaining);
         throw new Error('PROVIDER_RETRY_LATER');
       }
-      if (attempt === 4) throw new Error(`DATA_HTTP_${response.status}:${host}`);
+      if (attempt === 4) {
+        if (response.status === 429)
+          this.store?.set(`retry_after:${host}`, Date.now() + Math.max(60_000, remaining));
+        throw new Error(`DATA_HTTP_${response.status}:${host}`);
+      }
       await this.sleep(remaining);
     }
     throw new Error('Request exhausted');
