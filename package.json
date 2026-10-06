@@ -21,7 +21,8 @@
     "worker:build": "wrangler deploy --dry-run --outdir output/worker",
     "worker:types": "wrangler types",
     "format": "prettier --write src scripts tests docs *.json *.jsonc *.md .github",
-    "format:check": "prettier --check src scripts tests docs *.json *.jsonc *.md .github"
+    "format:check": "prettier --check src scripts tests docs *.json *.jsonc *.md .github",
+    "preview:trackers": "tsx scripts/preview-trackers.ts"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",

@@ -17,7 +17,9 @@ export class DiscordPublisher implements Publisher {
     readonly client: Client,
     readonly store: Store,
     readonly data: DataService,
-    readonly charts: { render(data: Dataset, candidate?: Candidate): Promise<Buffer> },
+    readonly charts: {
+      render(data: Dataset, candidate?: Candidate, tracker?: SignalEvent): Promise<Buffer>;
+    },
     readonly budget: { image(now: number, bytes: number): boolean },
     readonly guildId: string,
   ) {}
@@ -62,11 +64,9 @@ export class DiscordPublisher implements Publisher {
         );
     if (!message) {
       let dataset: Dataset | undefined;
-      if (event.kind !== 'watch_tracker') {
-        try {
-          dataset = await this.data.dataset(event.instrument, event.recordedAt);
-        } catch {}
-      }
+      try {
+        dataset = await this.data.dataset(event.instrument, event.recordedAt);
+      } catch {}
       let options: OptionsContext[] = [];
       if (
         event.instrument.market === 'equity' &&
@@ -106,14 +106,36 @@ export class DiscordPublisher implements Publisher {
             ...dataset,
             daily: dataset.daily.filter((b) => b.end <= event.marketTime),
             weekly: dataset.weekly.filter((b) => b.end <= event.marketTime),
+            intraday: dataset.intraday.filter((b) => b.end <= event.marketTime),
             provenance: { ...event.provenance },
           };
-          if (frozen.daily.length && frozen.weekly.length) {
-            const rendered = await this.charts.render(frozen, event.candidate);
+          const intradayTracker = event.tracker?.timeframe === '15m';
+          if (event.kind === 'watch_tracker') {
+            const snapshotBar = event.candidate.breakout;
+            const bars = intradayTracker ? frozen.intraday : frozen.daily;
+            const exact = bars.map((b) => (b.start === snapshotBar.start ? snapshotBar : b));
+            if (intradayTracker) frozen.intraday = exact;
+            else frozen.daily = exact;
+          }
+          if (
+            frozen.daily.length &&
+            (intradayTracker ? frozen.intraday.length : frozen.weekly.length)
+          ) {
+            const rendered = await this.charts.render(
+              frozen,
+              event.kind === 'watch_tracker' ? undefined : event.candidate,
+              event.kind === 'watch_tracker' ? event : undefined,
+            );
             if (this.budget.image(Date.now(), rendered.length)) image = rendered;
           }
         } catch {
-          embed.addFields({ name: 'Chart', value: 'Chart unavailable; signal details retained.' });
+          embed.addFields({
+            name: 'Chart',
+            value:
+              event.kind === 'watch_tracker'
+                ? 'Chart unavailable; alert details retained.'
+                : 'Chart unavailable; signal details retained.',
+          });
         }
       if (image) embed.setImage('attachment://chart.png');
       message = await target.send({

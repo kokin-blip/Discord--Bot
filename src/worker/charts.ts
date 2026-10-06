@@ -1,5 +1,5 @@
 import puppeteer from '@cloudflare/puppeteer';
-import type { Candidate, Dataset } from '../domain.js';
+import type { Candidate, Dataset, SignalEvent } from '../domain.js';
 import type { Env } from './types.js';
 import type { CloudBudget } from './budget.js';
 import { chartSnapshot } from '../chart-snapshot.js';
@@ -9,7 +9,7 @@ export class CloudCharts {
     readonly env: Env,
     readonly budget: CloudBudget,
   ) {}
-  async render(data: Dataset, candidate?: Candidate): Promise<Buffer> {
+  async render(data: Dataset, candidate?: Candidate, tracker?: SignalEvent): Promise<Buffer> {
     if (!this.budget.reserveBrowser(Date.now()))
       throw new Error('BROWSER_FREE_ALLOWANCE_UNAVAILABLE');
     let active: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
@@ -55,6 +55,7 @@ export class CloudCharts {
       library,
       data,
       candidate,
+      tracker,
     );
     try {
       return await Promise.race([job, deadline]);

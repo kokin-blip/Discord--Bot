@@ -1,10 +1,11 @@
-import type { Candidate, Dataset } from './domain.js';
+import type { Candidate, Dataset, SignalEvent } from './domain.js';
 import { referenceGeometry } from './core/geometry.js';
 export async function chartSnapshot(
   launch: () => Promise<any>,
   library: string,
   data: Dataset,
   candidate?: Candidate,
+  tracker?: SignalEvent,
 ): Promise<Buffer> {
   const browser = await launch();
   try {
@@ -14,7 +15,7 @@ export async function chartSnapshot(
     });
     await page.route('**/*', (route: { abort(): Promise<void> }) => route.abort()); // Chart snapshots make no external requests.
     await page.setContent(
-      `<html><body style="margin:0;background:#11151c;color:#e6edf3;font-family:Arial"><header style="padding:20px 24px"><strong id="title" style="font-size:24px"></strong><div id="details" style="margin-top:8px;color:#a8b4c4"></div></header><div style="display:flex"><section><div style="padding:8px 24px">WEEKLY CONTEXT</div><div id="weekly"></div></section><section><div style="padding:8px 24px">DAILY SETUP</div><div id="daily"></div></section></div><footer style="padding:16px 24px;color:#a8b4c4">Charts powered by TradingView Lightweight Charts · tradingview.com<br>Signal references only · no order execution or fills implied</footer></body></html>`,
+      `<html><body style="margin:0;background:#11151c;color:#e6edf3;font-family:Arial"><header style="padding:20px 24px"><strong id="title" style="font-size:24px"></strong><div id="details" style="margin-top:8px;color:#a8b4c4"></div></header><div style="display:flex"><section><div style="padding:8px 24px" id="left-label">WEEKLY CONTEXT</div><div id="weekly"></div></section><section><div style="padding:8px 24px" id="right-label">DAILY SETUP</div><div id="daily"></div></section></div><footer style="padding:16px 24px;color:#a8b4c4">Charts powered by TradingView Lightweight Charts · tradingview.com<br>Signal references only · no order execution or fills implied</footer></body></html>`,
     );
     // Serialized TypeScript callbacks may contain esbuild's function-name helper.
     await page.addScriptTag({ content: 'globalThis.__name = (fn) => fn;\n' + library });
@@ -26,6 +27,7 @@ export async function chartSnapshot(
         geometry,
         title,
         details,
+        tracker,
       }: {
         daily: Dataset['daily'];
         weekly: Dataset['weekly'];
@@ -33,10 +35,20 @@ export async function chartSnapshot(
         geometry?: ReturnType<typeof referenceGeometry>;
         title: string;
         details: string;
+        tracker?: SignalEvent;
       }) => {
         const L = (window as unknown as { LightweightCharts: any }).LightweightCharts;
         document.getElementById('title')!.textContent = title;
         document.getElementById('details')!.textContent = details;
+        const intradayTracker = tracker?.tracker?.timeframe === '15m';
+        document.getElementById('left-label')!.textContent = intradayTracker
+          ? 'DAILY CONTEXT'
+          : 'WEEKLY CONTEXT';
+        document.getElementById('right-label')!.textContent = tracker
+          ? intradayTracker
+            ? '15-MINUTE ACTIVITY'
+            : 'DAILY ACTIVITY'
+          : 'DAILY SETUP';
         for (const [id, bars] of [
           ['weekly', weekly],
           ['daily', daily],
@@ -50,7 +62,7 @@ export async function chartSnapshot(
               attributionLogo: true,
             },
             grid: { vertLines: { color: '#202937' }, horzLines: { color: '#202937' } },
-            timeScale: { timeVisible: false, rightOffset: 10 },
+            timeScale: { timeVisible: intradayTracker && id === 'daily', rightOffset: 10 },
             rightPriceScale: { borderColor: '#334155' },
           });
           const candles = chart.addSeries(L.CandlestickSeries, {
@@ -78,10 +90,15 @@ export async function chartSnapshot(
             bars.map((b) => ({
               time: b.start / 1000,
               value: b.volume,
-              color: b.close >= b.open ? '#165e53' : '#6b3039',
+              color:
+                tracker && id === 'daily' && b.end === tracker.marketTime
+                  ? '#e9b35d'
+                  : b.close >= b.open
+                    ? '#165e53'
+                    : '#6b3039',
             })),
           );
-          for (const period of id === 'weekly' ? [30] : [10, 20, 50]) {
+          for (const period of id === 'weekly' && !intradayTracker ? [30] : [10, 20, 50]) {
             const average = chart.addSeries(L.LineSeries, {
               color:
                 period === 30 || period === 50 ? '#caac6c' : period === 10 ? '#57a8f1' : '#b293df',
@@ -174,15 +191,89 @@ export async function chartSnapshot(
               ]);
             }
           }
-          chart.timeScale().setVisibleLogicalRange({ from: 0, to: bars.length + 10 });
+          if (tracker?.tracker && id === 'daily' && bars.length) {
+            const t = tracker.tracker;
+            const last = bars.at(-1)!;
+            const color =
+              t.type === 'volume'
+                ? t.pressure === 'buying'
+                  ? '#22c6a8'
+                  : t.pressure === 'selling'
+                    ? '#ef6571'
+                    : '#a8b4c4'
+                : tracker.direction === 'bullish'
+                  ? '#22c6a8'
+                  : '#ef6571';
+            L.createSeriesMarkers(candles, [
+              {
+                time: last.start / 1000,
+                position: 'aboveBar',
+                color,
+                shape: 'circle',
+                text:
+                  t.type === 'volume'
+                    ? `${t.relativeVolume.toFixed(1)}× vol`
+                    : t.phase[0]!.toUpperCase() + t.phase.slice(1),
+              },
+            ]);
+            if (t.type === 'volume')
+              volume.createPriceLine({
+                price: t.baseline,
+                title: `${t.baselineDays}-day baseline`,
+                color: '#e9b35d',
+                lineWidth: 1,
+                lineStyle: 2,
+                axisLabelVisible: true,
+              });
+            if (t.type === 'reversal') {
+              for (const [price, title, lineColor] of [
+                [t.frozenHigh, 'Frozen swing high', '#57a8f1'],
+                [t.frozenLow, 'Frozen swing low', '#b293df'],
+                [t.cancellationLevel, 'Warning cancellation close', '#ef6571'],
+              ] as [number, string, string][])
+                candles.createPriceLine({
+                  price,
+                  title,
+                  color: lineColor,
+                  lineWidth: 1,
+                  lineStyle: 2,
+                  axisLabelVisible: true,
+                });
+              candles.applyOptions({
+                autoscaleInfoProvider: (original: () => any) => {
+                  const info = original();
+                  if (info) {
+                    info.priceRange.minValue = Math.min(
+                      info.priceRange.minValue,
+                      t.frozenLow,
+                      t.cancellationLevel,
+                    );
+                    info.priceRange.maxValue = Math.max(
+                      info.priceRange.maxValue,
+                      t.frozenHigh,
+                      t.cancellationLevel,
+                    );
+                  }
+                  return info;
+                },
+              });
+            }
+          }
+          chart.timeScale().setVisibleLogicalRange({
+            from: tracker && bars.length < 10 ? -5 : 0,
+            to: bars.length + 10,
+          });
         }
       },
       {
-        daily: data.daily.slice(-100),
-        weekly: data.weekly.slice(-60),
+        daily:
+          tracker?.tracker?.timeframe === '15m' ? data.intraday.slice(-96) : data.daily.slice(-100),
+        weekly:
+          tracker?.tracker?.timeframe === '15m' ? data.daily.slice(-100) : data.weekly.slice(-60),
+        tracker,
         c: candidate,
         geometry: candidate ? referenceGeometry(candidate) : undefined,
-        title: `${data.instrument.symbol} · ${candidate?.direction.toUpperCase() ?? 'MARKET CHART'} · ${data.instrument.venue}`,
+        title: `${data.instrument.symbol} · ${tracker ? (tracker.tracker?.type === 'volume' ? `${tracker.tracker.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${tracker.direction.toUpperCase()} REVERSAL ${tracker.tracker?.type === 'reversal' ? tracker.tracker.phase.toUpperCase() : ''}`) : (candidate?.direction.toUpperCase() ?? 'MARKET CHART')} · ${data.instrument.venue}`,
         details: `${data.provenance.feed} · data ${new Date(data.provenance.asOf).toISOString()} · ${data.provenance.delayMinutes}m minimum delay`,
       },
     );
