@@ -18,12 +18,17 @@ export class SignalService {
       return;
     this.running = true;
     const previous = this.store.get('last_scan', 0),
-      recovery = !previous || now - previous > 10 * 60_000;
+      recovery = !previous || now - previous > 10 * 60_000,
+      announcement = this.store.get<{ id: string; requestedAt: number } | null>(
+        'scan_announcement',
+        null,
+      );
     const progress = (stage: string) => this.store.set('scan_progress', { stage, at: Date.now() });
     try {
       progress('discovery');
       const newDay = this.store.get('discovery_day', '') !== utcDate(now),
-        pool = newDay || force ? await this.data.universe(now) : [];
+        pool = newDay || force || announcement ? await this.data.universe(now) : [];
+      const discoveryComplete = this.store.get('discovery_progress', null) === null;
       progress('daily_history');
       await this.data.refreshDaily([...pool, ...this.store.monitored()], now, force);
       const config = this.store.strategy(),
@@ -37,7 +42,7 @@ export class SignalService {
           this.quality(i, e);
         }
       }
-      if (pool.length) {
+      if ((newDay || force || announcement) && discoveryComplete) {
         this.store.selectAuto(rank(candidates).map((c) => c.instrument));
         this.store.set('discovery_day', utcDate(now));
       }
@@ -144,7 +149,7 @@ export class SignalService {
           `Recovery replay completed; ${recovered} lifecycle events recorded. Historical entry triggers were not published.`,
           'summaries',
         );
-      if (newDay) {
+      if (newDay && discoveryComplete) {
         this.notice(
           now,
           `Daily discovery: ${pool.length} liquid instruments scanned; ${this.store.watchRows().filter((x) => x.auto).length} auto-selected; ${this.store.activeEntries()} active signal ideas.`,
@@ -157,6 +162,15 @@ export class SignalService {
       if (!failed.length && instruments.length) this.health(now);
       else this.store.set('soak_start', 0);
       progress('complete');
+      if (announcement && discoveryComplete) {
+        this.notice(
+          now,
+          `Scan complete: ${instruments.length} symbols monitored; ${failed.length} paused by data-quality checks; ${this.store.activeIdeas().length} active ideas; ${this.store.activeEntries()} entry signals active.`,
+          'summaries',
+          announcement.id,
+        );
+        this.store.set('scan_announcement', null);
+      }
     } catch (error) {
       const stage = this.store.get<{ stage: string }>('scan_progress', { stage: 'unknown' }).stage;
       this.store.set('last_error_stage', stage);
@@ -176,7 +190,7 @@ export class SignalService {
     if (!last || now - last > 10 * 60_000) this.store.set('soak_start', now);
     this.store.set('healthy_at', now);
   }
-  notice(now: number, text: string, route: 'summaries' | 'operations') {
+  notice(now: number, text: string, route: 'summaries' | 'operations', requestId?: string) {
     const c: Candidate = {
       id: stableId(route, utcDate(now)),
       instrument: { id: 'system', symbol: 'BOT', market: 'equity', venue: 'Discord' },
@@ -193,7 +207,7 @@ export class SignalService {
       reasons: [text],
     };
     const event: SignalEvent = {
-      id: stableId(c.id, text),
+      id: requestId ? stableId('scan-complete', requestId) : stableId(c.id, text),
       ideaId: c.id,
       instrument: c.instrument,
       direction: c.direction,

@@ -285,11 +285,24 @@ export class CommandHandler {
         return;
       }
       if (i.commandName === 'scan') {
+        if (this.store.settings().paused) {
+          await i.editReply('Scanning is paused. Use /resume before requesting a scan.');
+          return;
+        }
+        if (this.store.get('scan_announcement', null)) {
+          await i.editReply(
+            'A requested scan is pending. Its completion will be announced publicly.',
+          );
+          return;
+        }
         if (this.service.running) {
           await i.editReply('A scan is already running.');
           return;
         }
-        await i.editReply('Scan requested. Results will use configured destinations.');
+        this.store.set('scan_announcement', { id: i.id, requestedAt: Date.now() });
+        await i.editReply(
+          'Scan requested. Completion will be announced publicly in the summaries channel (the test channel in test mode).',
+        );
         if (this.requestScan) this.requestScan();
         else
           void this.service

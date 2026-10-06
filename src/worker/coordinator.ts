@@ -110,7 +110,12 @@ export class SignalCoordinator {
         this.store.set('scan_requested', false);
         // Discovery batches advance each minute. Monitoring remains on a five-minute cadence.
         const discoveryDue = this.store.get('discovery_day', '') !== day;
-        if (discoveryDue || force || now - this.store.get('last_poll', 0) >= 300_000) {
+        if (
+          discoveryDue ||
+          force ||
+          this.store.get('scan_announcement', null) ||
+          now - this.store.get('last_poll', 0) >= 300_000
+        ) {
           stage = 'scan';
           await this.service.scan(now, force);
           this.store.set('last_poll', now);

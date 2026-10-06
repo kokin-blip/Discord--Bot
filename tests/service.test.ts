@@ -14,12 +14,50 @@ it('records the failing scan stage and provider code and clears the running flag
       },
     } as unknown as DataService;
     const service = new SignalService(s, data);
+    s.set('scan_announcement', { id: 'failed-request', requestedAt: Date.now() });
     await expect(service.scan(Date.now())).rejects.toThrow('DATA_HTTP_401');
     expect(service.running).toBe(false);
     expect(s.get('last_scan', null)).toBeNull();
     expect(s.get('last_error', null)).toBe('DATA_HTTP_401:paper-api.alpaca.markets');
     expect(s.get('last_error_stage', null)).toBe('discovery');
     expect(s.get<{ stage: string }>('scan_progress', { stage: '' }).stage).toBe('failed');
+    expect(s.get('scan_announcement', null)).not.toBeNull();
+    expect(s.pending(Date.now())).toHaveLength(0);
+  } finally {
+    s.close();
+  }
+});
+it('announces a requested scan once after all discovery batches finish, including an empty universe', async () => {
+  const s = new Store(':memory:');
+  try {
+    let batch = 0;
+    const now = Date.now();
+    const data = {
+      universe: async () => {
+        s.set('discovery_progress', ++batch === 1 ? { market: 'crypto', offset: 10 } : null);
+        return [];
+      },
+      refreshDaily: async () => {},
+      refreshIntraday: async () => {},
+    } as unknown as DataService;
+    const service = new SignalService(s, data);
+    s.set('scan_announcement', { id: 'request-one', requestedAt: now });
+    const completions = () =>
+      s.pending(now + 300_000).filter((p) => p.event.reasons[0]?.startsWith('Scan complete:'));
+    await service.scan(now, true);
+    expect(completions()).toHaveLength(0);
+    expect(s.get('scan_announcement', null)).not.toBeNull();
+    await service.scan(now + 60_000);
+    expect(completions()).toHaveLength(1);
+    expect(completions()[0]?.route).toBe('summaries');
+    expect(completions()[0]?.event.reasons[0]).toContain('0 symbols monitored');
+    expect(s.get('scan_announcement', null)).toBeNull();
+    expect(s.get('discovery_day', '')).toBe(utcDate(now));
+    await service.scan(now + 120_000);
+    expect(completions()).toHaveLength(1);
+    s.set('scan_announcement', { id: 'request-two', requestedAt: now + 180_000 });
+    await service.scan(now + 180_000, true);
+    expect(completions()).toHaveLength(2);
   } finally {
     s.close();
   }
