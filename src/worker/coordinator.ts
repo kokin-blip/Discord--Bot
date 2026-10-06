@@ -22,6 +22,7 @@ import { DiscordPublisher } from '../discord/publisher.js';
 import { CommandHandler } from '../discord/commands.js';
 import { routes } from '../config.js';
 import { diagnosticCode } from '../core/errors.js';
+import { activationIssues } from './activation.js';
 export class SignalCoordinator {
   readonly store: Store;
   readonly budget: CloudBudget;
@@ -66,13 +67,7 @@ export class SignalCoordinator {
     );
   }
   private configured() {
-    return (
-      this.env.FREE_PLAN_CONFIRMED === 'true' &&
-      !!this.env.DISCORD_TOKEN &&
-      !!this.env.ALPACA_API_KEY &&
-      !!this.env.ALPACA_API_SECRET &&
-      !!this.env.DISCORD_GUILD_ID
-    );
+    return activationIssues(this.env).length === 0;
   }
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;

@@ -3,6 +3,24 @@ import { verifySignature } from '../src/worker/signature.js';
 import { CloudSql } from '../src/worker/sql.js';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
 import { diagnosticCode } from '../src/core/errors.js';
+import { activationIssues } from '../src/worker/activation.js';
+it('reports each activation blocker without including credential values', () => {
+  const configured = {
+    FREE_PLAN_CONFIRMED: 'true',
+    DISCORD_TOKEN: 'private-token',
+    DISCORD_GUILD_ID: '123',
+    ALPACA_API_KEY: 'private-key',
+    ALPACA_API_SECRET: 'private-secret',
+  };
+  expect(activationIssues(configured)).toEqual([]);
+  expect(activationIssues({ ...configured, FREE_PLAN_CONFIRMED: 'false' })).toEqual([
+    'FREE_PLAN_CONFIRMED must be set to true after verifying the hosting free-plan checkpoint.',
+  ]);
+  const missing = activationIssues({ ...configured, ALPACA_API_SECRET: '  ' });
+  expect(missing).toEqual(['ALPACA_API_SECRET is missing or empty.']);
+  expect(missing.join(' ')).not.toContain('private-');
+  expect(activationIssues({})).toHaveLength(5);
+});
 it('keeps provider failure codes without exposing arbitrary exception contents', () => {
   expect(diagnosticCode(new Error('DATA_HTTP_401:paper-api.alpaca.markets'))).toBe(
     'DATA_HTTP_401:paper-api.alpaca.markets',

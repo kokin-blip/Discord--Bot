@@ -2,6 +2,7 @@ import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-
 import type { Env } from './types.js';
 export { SignalCoordinator } from './coordinator.js';
 import { verifySignature } from './signature.js';
+import { activationIssues } from './activation.js';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== 'POST' || new URL(request.url).pathname !== '/interactions')
@@ -31,16 +32,12 @@ export default {
         type: 4,
         data: { content: 'This bot serves one configured private server.', flags: 64 },
       });
-    if (
-      env.FREE_PLAN_CONFIRMED !== 'true' ||
-      !env.DISCORD_TOKEN ||
-      !env.ALPACA_API_KEY ||
-      !env.ALPACA_API_SECRET
-    )
+    const issues = activationIssues(env);
+    if (issues.length)
       return Response.json({
         type: 4,
         data: {
-          content: 'Bot activation requires the free-plan checkpoint and market-data credentials.',
+          content: `Bot activation blocked:\n${issues.map((issue) => `• ${issue}`).join('\n')}\nUpdate this Worker's runtime settings in Cloudflare, then save/deploy.`,
           flags: 64,
         },
       });
