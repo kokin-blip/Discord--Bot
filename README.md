@@ -61,3 +61,5 @@ Local type checks, fixtures, chart rendering, Worker bundling, and local schedul
 `npm audit` currently reports upstream high-severity findings in the Cloudflare Puppeteer package's Node browser-download dependency chain (`extract-zip` and proxy/FTP dependencies). Those modules are absent from the generated Worker bundle; this app never downloads or extracts browser archives through Puppeteer. Review the upstream advisory before changing that usage. Do not downgrade to the obsolete version suggested by `npm audit fix --force`.
 
 The strategy is experimental. Reference prices, target touches, and planned reward/risk are not fills, returns, or success probabilities.
+
+`/watch add` offers searchable symbol quick picks for common stocks, ETFs and Coinbase USD pairs. Choose the market first to filter the dropdown, then pick a symbol or type a custom one. Suggestions are examples; normal provider, strategy, data-quality and pin-limit checks still apply. Command definitions update automatically after deployment; no reinvite is needed.

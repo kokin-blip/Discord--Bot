@@ -24,9 +24,6 @@ for (const action of ['add', 'remove', 'restore'])
       .setName(action)
       .setDescription(`${action} a shared watchlist symbol`)
       .addStringOption((o) =>
-        o.setName('symbol').setDescription('AAPL or BTC-USD').setRequired(true),
-      )
-      .addStringOption((o) =>
         o
           .setName('market')
           .setDescription('Market')
@@ -35,6 +32,13 @@ for (const action of ['add', 'remove', 'restore'])
             { name: 'US stock / ETF', value: 'equity' },
             { name: 'Coinbase USD spot', value: 'crypto' },
           ),
+      )
+      .addStringOption((o) =>
+        o
+          .setName('symbol')
+          .setDescription('Choose a quick pick or type AAPL / BTC-USD')
+          .setRequired(true)
+          .setAutocomplete(action === 'add'),
       ),
   );
 export const commands: { toJSON(): RESTPostAPIChatInputApplicationCommandsJSONBody }[] = [watch];

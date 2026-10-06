@@ -2,6 +2,7 @@ import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-
 import type { Env } from './types.js';
 export { SignalCoordinator } from './coordinator.js';
 import { verifySignature } from './signature.js';
+import { watchSuggestions, type AutocompleteRequest } from '../discord/autocomplete.js';
 import { activationIssues } from './activation.js';
 import { failureMessage, failureResponse } from './failures.js';
 export default {
@@ -28,6 +29,16 @@ export default {
       return new Response('Malformed JSON', { status: 400 });
     }
     if (message.type === 1) return Response.json({ type: 1 });
+    if (message.type === 4)
+      return Response.json({
+        type: 8,
+        data: {
+          choices:
+            message.guild_id === env.DISCORD_GUILD_ID
+              ? watchSuggestions(message as AutocompleteRequest)
+              : [],
+        },
+      });
     if (message.type !== 2 || message.guild_id !== env.DISCORD_GUILD_ID)
       return Response.json({
         type: 4,
