@@ -1,5 +1,6 @@
 import type { Candidate, Dataset, SignalEvent } from './domain.js';
 import { referenceGeometry } from './core/geometry.js';
+export const CHART_STYLE_VERSION = 'tv-dark-v2';
 export async function chartSnapshot(
   launch: () => Promise<any>,
   library: string,

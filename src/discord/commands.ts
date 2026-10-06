@@ -12,6 +12,7 @@ import { SignalService } from '../service.js';
 import type { DiscordPublisher } from './publisher.js';
 import type { Candidate, Dataset } from '../domain.js';
 import { debugReport, debugSample } from './debug.js';
+import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 import { card, trackerCard, tradingView } from './cards.js';
 const watch = new SlashCommandBuilder()
   .setName('watch')
@@ -287,7 +288,7 @@ export class CommandHandler {
             null,
           );
           await i.editReply(
-            `Synthetic test card delivered to <#${this.testChannel}>. Chart: ${result?.chartAttached ? 'attached' : 'unavailable or image allowance exhausted'}. Real strategy state and tracker cursors were unchanged.`,
+            `Synthetic test card delivered to <#${this.testChannel}>. Chart: ${result?.chartAttached ? 'attached' : 'unavailable or image allowance exhausted'}. Runtime: ${this.runtimeVersion}. Chart style: ${CHART_STYLE_VERSION}. Real strategy state and tracker cursors were unchanged.`,
           );
         }
         return;
@@ -425,6 +426,7 @@ export class CommandHandler {
           JSON.stringify(
             {
               runtimeVersion: this.runtimeVersion,
+              chartStyleVersion: CHART_STYLE_VERSION,
               commandRegistration: {
                 ...this.store.get<object>('command_registration_details', {}),
                 error: this.store.get('command_registration_error', null),

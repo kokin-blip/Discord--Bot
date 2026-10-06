@@ -12,6 +12,7 @@ import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
 import { buttons, card, trackerCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
+import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 export class DiscordPublisher implements Publisher {
   constructor(
     readonly client: Client,
@@ -137,11 +138,16 @@ export class DiscordPublisher implements Publisher {
                 : 'Chart unavailable; signal details retained.',
           });
         }
-      if (image) embed.setImage('attachment://chart.png');
+      const imageName = event.debug ? `chart-${CHART_STYLE_VERSION}-${event.id}.png` : 'chart.png';
+      if (event.debug)
+        embed.setFooter({
+          text: `${embed.data.footer?.text ?? ''} · chart ${CHART_STYLE_VERSION}`,
+        });
+      if (image) embed.setImage(`attachment://${imageName}`);
       message = await target.send({
         embeds: [embed],
         components: event.strategyVersion === 'system' ? [] : [buttons(event)],
-        files: image ? [new AttachmentBuilder(image, { name: 'chart.png' })] : [],
+        files: image ? [new AttachmentBuilder(image, { name: imageName })] : [],
         allowedMentions: { parse: [] },
         nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
         enforceNonce: true,
@@ -155,6 +161,7 @@ export class DiscordPublisher implements Publisher {
         messageId: message.id,
         eventId: event.id,
         chartAttached: message.embeds.some((e) => !!e.image?.url),
+        chartStyleVersion: CHART_STYLE_VERSION,
       });
     if (!existing && event.strategyVersion.startsWith('br-v1-')) {
       this.store.saveThread(event.ideaId, destination, message.id);
