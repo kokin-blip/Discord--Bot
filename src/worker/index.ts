@@ -3,6 +3,7 @@ import type { Env } from './types.js';
 export { SignalCoordinator } from './coordinator.js';
 import { verifySignature } from './signature.js';
 import { activationIssues } from './activation.js';
+import { failureMessage, failureResponse } from './failures.js';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== 'POST' || new URL(request.url).pathname !== '/interactions')
@@ -43,20 +44,22 @@ export default {
       });
     const stub = env.SIGNALS.get(env.SIGNALS.idFromName(env.DISCORD_GUILD_ID));
     ctx.waitUntil(
-      stub.fetch('https://internal/command', { method: 'POST', body }).then(async (response) => {
-        if (!response.ok && message.application_id && message.token)
-          await fetch(
-            `https://discord.com/api/v10/webhooks/${encodeURIComponent(message.application_id)}/${encodeURIComponent(message.token)}/messages/@original`,
-            {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                content:
-                  'Operation unavailable. Check bot activation, free-plan resources, and server permissions.',
-              }),
-            },
-          );
-      }),
+      stub
+        .fetch('https://internal/command', { method: 'POST', body })
+        .catch(() => failureResponse(new Error('COORDINATOR_REQUEST_FAILED'), 'command'))
+        .then(async (response) => {
+          if (!response.ok && message.application_id && message.token)
+            await fetch(
+              `https://discord.com/api/v10/webhooks/${encodeURIComponent(message.application_id)}/${encodeURIComponent(message.token)}/messages/@original`,
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  content: await failureMessage(response),
+                }),
+              },
+            );
+        }),
     );
     return Response.json({ type: 5, data: { flags: 64 } });
   },

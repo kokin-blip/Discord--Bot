@@ -23,6 +23,7 @@ import { CommandHandler } from '../discord/commands.js';
 import { routes } from '../config.js';
 import { diagnosticCode } from '../core/errors.js';
 import { activationIssues } from './activation.js';
+import { failureResponse, type FailureStage } from './failures.js';
 export class SignalCoordinator {
   readonly store: Store;
   readonly budget: CloudBudget;
@@ -72,19 +73,20 @@ export class SignalCoordinator {
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     if (!this.configured())
-      return new Response('Set free-plan confirmation and required secrets before activation.', {
-        status: 503,
-      });
+      return failureResponse(new Error('BOT_ACTIVATION_REQUIRED'), 'activation');
     if (!this.budget.tick(Date.now()) && path !== '/command')
-      return new Response('Free allowance safety limit reached.', { status: 503 });
+      return failureResponse(new Error('FREE_ALLOWANCE_SAFETY_LIMIT'), 'budget');
+    let stage: FailureStage = 'discord_identity';
     try {
       if (!this.client.user) {
         const raw = (await this.client.rest.get(Routes.user())) as APIUser;
         const Self = ClientUser as unknown as new (client: Client, data: APIUser) => ClientUser;
         this.client.user = new Self(this.client, raw);
       }
+      stage = 'discord_guild';
       await this.client.guilds.fetch({ guild: this.env.DISCORD_GUILD_ID, force: true });
       if (path === '/command') {
+        stage = 'command';
         const raw = (await request.json()) as APIChatInputApplicationCommandInteraction;
         // The public Worker has already verified the signature and returned the deferred response.
         const Interaction = ChatInputCommandInteraction as unknown as new (
@@ -109,9 +111,11 @@ export class SignalCoordinator {
         // Discovery batches advance each minute. Monitoring remains on a five-minute cadence.
         const discoveryDue = this.store.get('discovery_day', '') !== day;
         if (discoveryDue || force || now - this.store.get('last_poll', 0) >= 300_000) {
+          stage = 'scan';
           await this.service.scan(now, force);
           this.store.set('last_poll', now);
         }
+        stage = 'publication';
         if (this.store.settings().paused) return new Response('Paused');
         if (this.env.RELEASE_MODE === 'production') {
           const soak = this.store.get('soak_start', 0);
@@ -153,8 +157,9 @@ export class SignalCoordinator {
       }
     } catch (e) {
       this.store.set('last_error', diagnosticCode(e));
+      if (stage !== 'scan') this.store.set('last_error_stage', stage);
       this.store.set('soak_start', 0);
-      return new Response('Operation unavailable; inspect /status.', { status: 503 });
+      return failureResponse(e, stage);
     }
   }
 }

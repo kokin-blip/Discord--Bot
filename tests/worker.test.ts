@@ -4,6 +4,35 @@ import { CloudSql } from '../src/worker/sql.js';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
 import { diagnosticCode } from '../src/core/errors.js';
 import { activationIssues } from '../src/worker/activation.js';
+import { failureMessage, failureResponse } from '../src/worker/failures.js';
+it('reports Discord authentication and access failures without forwarding raw errors', async () => {
+  const error = Object.assign(new Error('Request contained private-token'), {
+    name: 'DiscordAPIError[0]',
+    status: 401,
+    code: 0,
+  });
+  const message = await failureMessage(failureResponse(error, 'discord_identity'));
+  expect(message).toContain('DISCORD_INVALID_TOKEN');
+  expect(message).toContain('Step: discord_identity');
+  expect(message).toContain('DISCORD_TOKEN');
+  expect(message).not.toContain('private-token');
+  expect(diagnosticCode(Object.assign(error, { status: 403, code: 50001 }))).toBe(
+    'DISCORD_MISSING_ACCESS',
+  );
+  expect(diagnosticCode(Object.assign(error, { status: 403, code: 50013 }))).toBe(
+    'DISCORD_MISSING_PERMISSIONS',
+  );
+});
+it('does not relay unstructured coordinator responses or unknown error contents', async () => {
+  expect(await failureMessage(new Response('private-token', { status: 503 }))).toContain(
+    'COORDINATOR_HTTP_503',
+  );
+  const message = await failureMessage(
+    Response.json({ error: 'private-token', stage: 'private-token' }, { status: 503 }),
+  );
+  expect(message).toContain('WORKER_OPERATION_FAILED');
+  expect(message).not.toContain('private-token');
+});
 it('reports each activation blocker without including credential values', () => {
   const configured = {
     FREE_PLAN_CONFIRMED: 'true',
