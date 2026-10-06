@@ -10,12 +10,22 @@ export async function chartSnapshot(
   const browser = await launch();
   try {
     const page = await browser.newPage({
-      viewport: { width: 1200, height: 860 },
+      viewport: { width: 1200, height: 920 },
       deviceScaleFactor: 1,
     });
     await page.route('**/*', (route: { abort(): Promise<void> }) => route.abort()); // Chart snapshots make no external requests.
     await page.setContent(
-      `<html><body style="margin:0;background:#11151c;color:#e6edf3;font-family:Arial"><header style="padding:20px 24px"><strong id="title" style="font-size:24px"></strong><div id="details" style="margin-top:8px;color:#a8b4c4"></div></header><div style="display:flex"><section><div style="padding:8px 24px" id="left-label">WEEKLY CONTEXT</div><div id="weekly"></div></section><section><div style="padding:8px 24px" id="right-label">DAILY SETUP</div><div id="daily"></div></section></div><footer style="padding:16px 24px;color:#a8b4c4">Charts powered by TradingView Lightweight Charts · tradingview.com<br>Signal references only · no order execution or fills implied</footer></body></html>`,
+      `<html><head><style>
+        *{box-sizing:border-box} body{margin:0;background:#0d0e10;color:#e0e3e8;font-family:Arial}
+        header{height:82px;padding:16px 24px;border-bottom:1px solid #24262b}
+        #title{font-size:21px;font-weight:600} #details{margin-top:7px;color:#a5a9b2;font-size:12px}
+        section{position:relative} .label{position:absolute;z-index:2;top:12px;left:24px;font-size:12px;color:#c3c7ce;pointer-events:none}
+        .metrics{position:absolute;z-index:2;top:12px;right:110px;color:#a5a9b2;font-size:12px;pointer-events:none} .watermark{position:absolute;z-index:2;left:0;right:100px;top:42%;text-align:center;color:#ffffff18;font-size:48px;font-weight:600;pointer-events:none}
+        #context{border-top:1px solid #24262b} footer{height:48px;padding:10px 24px;color:#a5a9b2;font-size:11px;line-height:16px}
+        </style></head><body><header><strong id="title"></strong><div id="details"></div></header>
+        <section><div class="label" id="right-label">DAILY SETUP</div><div class="metrics" id="metrics"></div><div class="watermark" id="watermark"></div><div id="daily"></div></section>
+        <section id="context"><div class="label" id="left-label">WEEKLY CONTEXT</div><div id="weekly"></div></section>
+        <footer>Charts powered by TradingView Lightweight Charts · tradingview.com<br>Signal references only · no order execution or fills implied</footer></body></html>`,
     );
     // Serialized TypeScript callbacks may contain esbuild's function-name helper.
     await page.addScriptTag({ content: 'globalThis.__name = (fn) => fn;\n' + library });
@@ -40,7 +50,19 @@ export async function chartSnapshot(
         const L = (window as unknown as { LightweightCharts: any }).LightweightCharts;
         document.getElementById('title')!.textContent = title;
         document.getElementById('details')!.textContent = details;
+        document.getElementById('watermark')!.textContent =
+          title.split(' · ')[tracker?.debug ? 1 : 0]! +
+          (tracker?.tracker?.timeframe === '15m' ? ' · 15m' : ' · 1D');
         const intradayTracker = tracker?.tracker?.timeframe === '15m';
+        const lastBar = daily.at(-1);
+        const format = (value: number) =>
+          value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        document.getElementById('metrics')!.textContent =
+          tracker?.tracker?.type === 'volume'
+            ? `Volume ${format(tracker.tracker.volume)} · ${tracker.tracker.relativeVolume.toFixed(1)}× · ${tracker.tracker.baselineDays}d baseline ${format(tracker.tracker.baseline)}`
+            : lastBar
+              ? `O ${format(lastBar.open)}   H ${format(lastBar.high)}   L ${format(lastBar.low)}   C ${format(lastBar.close)}`
+              : '';
         document.getElementById('left-label')!.textContent = intradayTracker
           ? 'DAILY CONTEXT'
           : 'WEEKLY CONTEXT';
@@ -54,22 +76,32 @@ export async function chartSnapshot(
           ['daily', daily],
         ] as const) {
           const chart = L.createChart(document.getElementById(id), {
-            width: 600,
-            height: 620,
+            width: 1200,
+            height: id === 'daily' ? 610 : 180,
             layout: {
-              background: { color: '#11151c' },
-              textColor: '#a8b4c4',
+              background: { color: '#0d0e10' },
+              textColor: '#a5a9b2',
+              fontFamily: 'Arial',
+              fontSize: 12,
               attributionLogo: true,
             },
-            grid: { vertLines: { color: '#202937' }, horzLines: { color: '#202937' } },
+            grid: { vertLines: { visible: false }, horzLines: { color: '#ffffff06' } },
             timeScale: { timeVisible: intradayTracker && id === 'daily', rightOffset: 10 },
-            rightPriceScale: { borderColor: '#334155' },
+            rightPriceScale: {
+              borderVisible: false,
+              minimumWidth: 100,
+              scaleMargins: {
+                top: id === 'daily' ? 0.12 : 0.25,
+                bottom: id === 'daily' ? 0.25 : 0.1,
+              },
+            },
+            crosshair: { mode: 0 },
           });
           const candles = chart.addSeries(L.CandlestickSeries, {
-            upColor: '#22c6a8',
-            downColor: '#ef6571',
-            wickUpColor: '#22c6a8',
-            wickDownColor: '#ef6571',
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
             borderVisible: false,
           });
           candles.setData(
@@ -84,8 +116,13 @@ export async function chartSnapshot(
           const volume = chart.addSeries(L.HistogramSeries, {
             priceFormat: { type: 'volume' },
             priceScaleId: 'volume',
+            lastValueVisible: false,
+            priceLineVisible: false,
+            visible: id === 'daily',
           });
-          volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+          volume
+            .priceScale()
+            .applyOptions({ scaleMargins: { top: 0.79, bottom: 0 }, visible: false });
           volume.setData(
             bars.map((b) => ({
               time: b.start / 1000,
@@ -94,8 +131,8 @@ export async function chartSnapshot(
                 tracker && id === 'daily' && b.end === tracker.marketTime
                   ? '#e9b35d'
                   : b.close >= b.open
-                    ? '#165e53'
-                    : '#6b3039',
+                    ? '#26a69a70'
+                    : '#ef535070',
             })),
           );
           for (const period of id === 'weekly' && !intradayTracker ? [30] : [10, 20, 50]) {
@@ -121,7 +158,7 @@ export async function chartSnapshot(
               ),
             );
           }
-          if (c) {
+          if (c && id === 'daily') {
             candles.applyOptions({
               autoscaleInfoProvider: (original: () => any) => {
                 const info = original();
@@ -141,10 +178,10 @@ export async function chartSnapshot(
             for (const [price, label, color] of [
               [c.baseHigh, 'Base high', '#63748d'],
               [c.baseLow, 'Base low', '#63748d'],
-              [c.level, 'Breakout / invalidation close', '#e9b35d'],
+              [c.level, 'Invalidation close', '#e9b35d'],
               [
                 geometry?.entry,
-                geometry?.provisional ? 'Hypothetical entry' : 'Entry reference',
+                geometry?.provisional ? 'Provisional entry' : 'Entry reference',
                 '#57a8f1',
               ],
               [
@@ -155,7 +192,7 @@ export async function chartSnapshot(
               ...(geometry?.targets ?? []).map((t: number, i: number) => [
                 t,
                 `${geometry?.provisional ? 'Provisional ' : ''}T${i + 1}`,
-                '#22c6a8',
+                '#26a69a',
               ]),
             ] as [number | undefined, string, string][]) {
               if (price !== undefined && !(label.startsWith('Base') && price === c.level))
@@ -197,13 +234,13 @@ export async function chartSnapshot(
             const color =
               t.type === 'volume'
                 ? t.pressure === 'buying'
-                  ? '#22c6a8'
+                  ? '#26a69a'
                   : t.pressure === 'selling'
-                    ? '#ef6571'
+                    ? '#ef5350'
                     : '#a8b4c4'
                 : tracker.direction === 'bullish'
-                  ? '#22c6a8'
-                  : '#ef6571';
+                  ? '#26a69a'
+                  : '#ef5350';
             L.createSeriesMarkers(candles, [
               {
                 time: last.start / 1000,
@@ -223,13 +260,13 @@ export async function chartSnapshot(
                 color: '#e9b35d',
                 lineWidth: 1,
                 lineStyle: 2,
-                axisLabelVisible: true,
+                axisLabelVisible: false,
               });
             if (t.type === 'reversal') {
               for (const [price, title, lineColor] of [
                 [t.frozenHigh, 'Frozen swing high', '#57a8f1'],
                 [t.frozenLow, 'Frozen swing low', '#b293df'],
-                [t.cancellationLevel, 'Warning cancellation close', '#ef6571'],
+                [t.cancellationLevel, 'Warning cancellation close', '#ef5350'],
               ] as [number, string, string][])
                 candles.createPriceLine({
                   price,
@@ -260,7 +297,12 @@ export async function chartSnapshot(
             }
           }
           chart.timeScale().setVisibleLogicalRange({
-            from: tracker && bars.length < 10 ? -5 : 0,
+            from:
+              tracker && bars.length < 10
+                ? -5
+                : id === 'daily'
+                  ? Math.max(0, bars.length - 70)
+                  : Math.max(0, bars.length - 45),
             to: bars.length + 10,
           });
         }

@@ -127,27 +127,38 @@ export function debugSample(now: number, requestId: string): { data: Dataset; ev
   const end = Math.floor(now / QUARTER) * QUARTER;
   const dailyEnd = Math.floor(now / DAY) * DAY;
   const daily = Array.from({ length: 260 }, (_, n) => {
-    const close = 100 + n * 0.15;
+    const price = (i: number) =>
+      100 + i * 0.15 + 3.2 * Math.sin(i * 0.22) + 0.9 * Math.sin(i * 1.7);
+    const close = price(n);
+    const open = price(n - 1);
     return {
       start: dailyEnd - (260 - n) * DAY,
       end: dailyEnd - (259 - n) * DAY,
-      open: close - 0.25,
-      high: close + 1,
-      low: close - 1,
+      open,
+      high: Math.max(open, close) + 0.25 + 0.6 * Math.abs(Math.sin(n)),
+      low: Math.min(open, close) - 0.3 - 0.5 * Math.abs(Math.cos(n)),
       close,
-      volume: 1000,
+      volume: 800 + 600 * Math.abs(Math.sin(n * 1.3)),
     };
   });
   const intraday = Array.from({ length: 11 * 96 }, (_, n) => {
-    const close = 130 + n * 0.01;
+    const price = (i: number) =>
+      130 + i * 0.01 + 0.65 * Math.sin(i * 0.17) + 0.15 * Math.sin(i * 1.9);
+    const open = price(n - 1);
+    const close = n === 11 * 96 - 1 ? open + 0.55 : price(n);
     return {
       start: end - (11 * 96 - n) * QUARTER,
       end: end - (11 * 96 - n - 1) * QUARTER,
-      open: close - 0.05,
-      high: close + 0.2,
-      low: close - 0.2,
+      open,
+      high: Math.max(open, close) + 0.04 + 0.08 * Math.abs(Math.sin(n)),
+      low: Math.min(open, close) - 0.04 - 0.08 * Math.abs(Math.cos(n)),
       close,
-      volume: n === 11 * 96 - 1 ? 2500 : 1000,
+      volume:
+        n === 11 * 96 - 1
+          ? 2500
+          : n % 96 === 95
+            ? 1000
+            : 850 + 300 * Math.abs(Math.sin((n % 96) * 1.3)),
     };
   });
   const data: Dataset = {
