@@ -48,7 +48,7 @@ export class DiscordPublisher implements Publisher {
     if (!perms?.has(required)) throw new Error('MISSING_CHANNEL_PERMISSIONS');
     return channel;
   }
-  async deliver(event: SignalEvent, destination: string): Promise<void> {
+  async deliver(event: SignalEvent, destination: string, snapshot?: Dataset): Promise<void> {
     if (this.store.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
     const channel = await this.validate(destination),
       existing = this.store.thread(event.ideaId);
@@ -65,7 +65,7 @@ export class DiscordPublisher implements Publisher {
     if (!message) {
       let dataset: Dataset | undefined;
       try {
-        dataset = await this.data.dataset(event.instrument, event.recordedAt);
+        dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
       } catch {}
       let options: OptionsContext[] = [];
       if (
@@ -148,6 +148,14 @@ export class DiscordPublisher implements Publisher {
       });
     }
     this.store.saveReceipt(event.id, destination, message.id);
+    if (event.debug)
+      this.store.set('debug_last_delivery', {
+        at: Date.now(),
+        channel: destination,
+        messageId: message.id,
+        eventId: event.id,
+        chartAttached: message.embeds.some((e) => !!e.image?.url),
+      });
     if (!existing && event.strategyVersion.startsWith('br-v1-')) {
       this.store.saveThread(event.ideaId, destination, message.id);
       const thread = message.hasThread

@@ -11,7 +11,8 @@ import { crypto, equity, benchmarkFor, type Instrument } from '../domain.js';
 import { SignalService } from '../service.js';
 import type { DiscordPublisher } from './publisher.js';
 import type { Candidate, Dataset } from '../domain.js';
-import { card, tradingView } from './cards.js';
+import { debugReport, debugSample } from './debug.js';
+import { card, trackerCard, tradingView } from './cards.js';
 const watch = new SlashCommandBuilder()
   .setName('watch')
   .setDescription('Manage the shared watchlist')
@@ -162,6 +163,22 @@ commands.push(
         ),
     ),
 );
+commands.push(
+  new SlashCommandBuilder()
+    .setName('debug')
+    .setDescription('Diagnose monitoring or test private-channel delivery')
+    .addSubcommand((s) =>
+      s
+        .setName('check')
+        .setDescription('Inspect cached data, tracker progress and alert settings')
+        .addStringOption((o) => o.setName('symbol').setDescription('Optional monitored symbol')),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('test')
+        .setDescription('Send a labeled synthetic chart alert to the private test channel'),
+    ),
+);
 export function authorized(admin: boolean, roles: string[], manager?: string) {
   return admin || (!!manager && roles.includes(manager));
 }
@@ -182,6 +199,8 @@ export class CommandHandler {
     readonly guildId: string,
     readonly requestScan?: () => void,
     readonly runtimeVersion = 'development',
+    readonly testChannel?: string,
+    readonly releaseMode: 'test' | 'production' = 'test',
   ) {}
   async handle(i: ChatInputCommandInteraction) {
     if (i.guildId !== this.guildId) {
@@ -193,7 +212,8 @@ export class CommandHandler {
     const sub = i.options.getSubcommand(false),
       readOnly =
         ['chart', 'idea', 'status'].includes(i.commandName) ||
-        (i.commandName === 'watch' && sub === 'list');
+        (i.commandName === 'watch' && sub === 'list') ||
+        (i.commandName === 'debug' && sub === 'check');
     const member = await i.guild!.members.fetch(i.user.id),
       admin = member.permissions.has(PermissionFlagsBits.Administrator);
     if (
@@ -210,10 +230,68 @@ export class CommandHandler {
     }
     await i.deferReply({ ephemeral: true });
     try {
-      if (this.budget.status().paused && i.commandName !== 'status')
+      if (
+        this.budget.status().paused &&
+        i.commandName !== 'status' &&
+        !(i.commandName === 'debug' && sub === 'check')
+      )
         throw new Error(
           'Free-plan resource budget exhausted; scanning and publication remain paused.',
         );
+      if (i.commandName === 'debug') {
+        if (sub === 'check') {
+          const report = debugReport(
+            this.store,
+            Date.now(),
+            this.runtimeVersion,
+            this.testChannel,
+            i.options.getString('symbol') ?? undefined,
+          );
+          const destination =
+            this.releaseMode === 'production'
+              ? this.store.settings().channels.watchlist
+              : this.testChannel;
+          let permissions = 'No publishing destination configured';
+          if (destination) {
+            try {
+              await this.publisher.validate(destination);
+              permissions = 'Channel permissions OK';
+            } catch (e) {
+              permissions = e instanceof Error ? e.message : 'Channel unavailable';
+            }
+          }
+          const json = JSON.stringify(
+            {
+              ...report,
+              releaseMode: this.releaseMode,
+              soakStarted: this.store.get('soak_start', null),
+              historicalReplayVerified: this.store.get('historical_replay_verified', false),
+              publishingPermissions: permissions,
+              budget: this.budget.status(),
+            },
+            null,
+            2,
+          );
+          await i.editReply({
+            content: `Debug report · ${permissions}. No alerts sent.`,
+            files: [{ attachment: Buffer.from(json), name: 'debug-report.json' }],
+          });
+        } else {
+          if (!this.testChannel)
+            throw new Error('Configure TEST_CHANNEL_ID to run a private delivery test.');
+          const { data, event } = debugSample(Date.now(), i.id);
+          this.store.recordEvent(event);
+          await this.publisher.deliver(event, this.testChannel, data);
+          const result = this.store.get<{ chartAttached: boolean } | null>(
+            'debug_last_delivery',
+            null,
+          );
+          await i.editReply(
+            `Synthetic test card delivered to <#${this.testChannel}>. Chart: ${result?.chartAttached ? 'attached' : 'unavailable or image allowance exhausted'}. Real strategy state and tracker cursors were unchanged.`,
+          );
+        }
+        return;
+      }
       if (i.commandName === 'watch') {
         if (sub === 'list') {
           const rows = this.store.watchRows();
@@ -393,7 +471,11 @@ export class CommandHandler {
           journal = this.store.journal(id);
         if (!journal.length) throw new Error('Unknown idea ID');
         await i.editReply({
-          embeds: [card(journal.at(-1)!)],
+          embeds: [
+            journal.at(-1)!.kind === 'watch_tracker'
+              ? trackerCard(journal.at(-1)!)
+              : card(journal.at(-1)!),
+          ],
           content: journal
             .map(
               (e) =>

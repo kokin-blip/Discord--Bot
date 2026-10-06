@@ -274,3 +274,32 @@ it.each(['render_failure', 'image_allowance'] as const)(
     }
   },
 );
+
+it('renders and delivers a synthetic debug snapshot without market-data access or real-idea mutations', async () => {
+  const { debugSample } = await import('../src/discord/debug.js');
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      { event, data } = debugSample(Date.now(), 'delivery-test');
+    h.publisher.data.dataset = async () => {
+      throw new Error('Market data must not be requested');
+    };
+    store.recordEvent(event);
+    await h.publisher.deliver(event, 'main', data);
+    await h.publisher.deliver(event, 'main', data);
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).toHaveBeenCalledTimes(1);
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain(
+      'DEBUG TEST · SYNTHETIC',
+    );
+    expect(store.get('debug_last_delivery', {})).toMatchObject({
+      chartAttached: true,
+      channel: 'main',
+    });
+    expect(store.pendingCount()).toBe(0);
+    expect(store.activeIdeas()).toHaveLength(0);
+    expect(h.thread.send).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});

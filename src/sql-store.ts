@@ -245,11 +245,14 @@ export class Store {
         : (this.db.prepare('SELECT body FROM events ORDER BY seq').all() as Row[])
     ).map((r) => JSON.parse(String((r as Row).body)));
   }
+  recordEvent(e: SignalEvent) {
+    this.db
+      .prepare('INSERT OR IGNORE INTO events(id,idea_id,body) VALUES(?,?,?)')
+      .run(e.id, e.ideaId, JSON.stringify(e));
+  }
   enqueue(e: SignalEvent, route: Route) {
     this.transaction(() => {
-      this.db
-        .prepare('INSERT OR IGNORE INTO events(id,idea_id,body) VALUES(?,?,?)')
-        .run(e.id, e.ideaId, JSON.stringify(e));
+      this.recordEvent(e);
       this.db.prepare('INSERT OR IGNORE INTO outbox(event_id,route) VALUES(?,?)').run(e.id, route);
     });
   }

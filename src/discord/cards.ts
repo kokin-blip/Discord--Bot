@@ -123,11 +123,11 @@ export function trackerCard(e: SignalEvent): EmbedBuilder {
           : 0xe9b35d,
     )
     .setTitle(
-      `${e.instrument.symbol} · ${timeframe} · ${t.type === 'volume' ? `${t.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${e.direction.toUpperCase()} REVERSAL ${t.phase.toUpperCase()}`}`,
+      `${e.debug ? 'DEBUG TEST · SYNTHETIC · ' : ''}${e.instrument.symbol} · ${timeframe} · ${t.type === 'volume' ? `${t.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${e.direction.toUpperCase()} REVERSAL ${t.phase.toUpperCase()}`}`,
     )
     .setDescription(
       t.type === 'volume'
-        ? 'Unusual market activity; this is not a trade entry signal. Pressure is estimated from candle direction, not measured buyer/seller volume.'
+        ? `${e.debug ? 'DELIVERY TEST ONLY: invented prices and volume. ' : ''}Unusual market activity; this is not a trade entry signal. Pressure is estimated from candle direction, not measured buyer/seller volume.`
         : 'Experimental market-structure tracker; separate from the breakout strategy. This is not a trade entry signal.',
     )
     .addFields({ name: 'Closing price', value: price(t.close), inline: true });

@@ -74,6 +74,7 @@ export interface Candidate {
   reasons: string[];
 }
 export interface SignalEvent {
+  debug?: boolean;
   kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker';
   tracker?: TrackerDetails;
   setupContext?: { entryBand: [number, number]; remainingSessions: number; totalSessions: number };

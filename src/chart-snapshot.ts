@@ -273,7 +273,9 @@ export async function chartSnapshot(
         tracker,
         c: candidate,
         geometry: candidate ? referenceGeometry(candidate) : undefined,
-        title: `${data.instrument.symbol} · ${tracker ? (tracker.tracker?.type === 'volume' ? `${tracker.tracker.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${tracker.direction.toUpperCase()} REVERSAL ${tracker.tracker?.type === 'reversal' ? tracker.tracker.phase.toUpperCase() : ''}`) : (candidate?.direction.toUpperCase() ?? 'MARKET CHART')} · ${data.instrument.venue}`,
+        title: tracker?.debug
+          ? `SYNTHETIC DEBUG TEST · ${data.instrument.symbol} · VOLUME ALERT`
+          : `${data.instrument.symbol} · ${tracker ? (tracker.tracker?.type === 'volume' ? `${tracker.tracker.pressure.toUpperCase()} PRESSURE · VOLUME SPIKE` : `${tracker.direction.toUpperCase()} REVERSAL ${tracker.tracker?.type === 'reversal' ? tracker.tracker.phase.toUpperCase() : ''}`) : (candidate?.direction.toUpperCase() ?? 'MARKET CHART')} · ${data.instrument.venue}`,
         details: `${data.provenance.feed} · data ${new Date(data.provenance.asOf).toISOString()} · ${data.provenance.delayMinutes}m minimum delay`,
       },
     );
