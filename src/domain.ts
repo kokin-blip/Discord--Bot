@@ -167,6 +167,8 @@ export type TrackerDetails =
       phase: 'warning' | 'confirmed' | 'cancelled' | 'expired';
       warningId: string;
       warningTime: number;
+      warningClose?: number;
+      directionalChangePercent?: number;
       frozenHigh: number;
       frozenLow: number;
       cancellationLevel: number;

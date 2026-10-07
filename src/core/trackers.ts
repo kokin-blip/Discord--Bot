@@ -177,6 +177,13 @@ export function reversalDetails(
     phase,
     warningId: pending.id,
     warningTime: pending.warning.end,
+    warningClose: pending.warning.close,
+    directionalChangePercent:
+      pending.warning.close > 0
+        ? (((pending.direction === 'bullish' ? 1 : -1) * (close - pending.warning.close)) /
+            pending.warning.close) *
+          100
+        : undefined,
     frozenHigh: pending.high,
     frozenLow: pending.low,
     cancellationLevel: pending.direction === 'bullish' ? pending.warning.low : pending.warning.high,

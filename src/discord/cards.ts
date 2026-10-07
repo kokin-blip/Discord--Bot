@@ -317,6 +317,16 @@ export function trackerCard(e: SignalEvent): EmbedBuilder {
         value: `${t.warningId} · ${new Date(t.warningTime).toISOString()} · ${t.elapsed}/${t.confirmationBars} candles elapsed`,
       },
     );
+  if (
+    t.type === 'reversal' &&
+    t.phase !== 'warning' &&
+    t.warningClose !== undefined &&
+    t.directionalChangePercent !== undefined
+  )
+    embed.addFields({
+      name: 'Hypothetical move since warning',
+      value: `**${signed(t.directionalChangePercent, '%')}** · ${e.direction === 'bullish' ? 'long' : 'short'} direction\nWarning close: $${price(t.warningClose)} → update close: $${price(t.close)}\nReference prices, not fills or realized profit; excludes fees and leverage. The warning was not an entry signal.`,
+    });
   return embed
     .addFields({
       name: 'Data',
