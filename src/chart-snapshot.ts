@@ -83,7 +83,7 @@ export async function chartSnapshot(
               background: { color: '#0d0e10' },
               textColor: '#a5a9b2',
               fontFamily: 'Arial',
-              fontSize: 12,
+              fontSize: 14,
               attributionLogo: true,
             },
             grid: { vertLines: { visible: false }, horzLines: { color: '#ffffff06' } },
@@ -302,7 +302,7 @@ export async function chartSnapshot(
               tracker && bars.length < 10
                 ? -5
                 : id === 'daily'
-                  ? Math.max(0, bars.length - 70)
+                  ? Math.max(0, bars.length - 48)
                   : Math.max(0, bars.length - 45),
             to: bars.length + 10,
           });
