@@ -102,8 +102,49 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
     });
   return embed;
 }
+export function isConfirmedExit(e: SignalEvent): boolean {
+  return (
+    e.candidate.entry !== undefined &&
+    ['final_target', 'invalidated', 'time_exit'].includes(e.state)
+  );
+}
+
 /** Compact public entry; the full qualification record is published in its thread. */
 export function publicCard(e: SignalEvent, options: OptionsContext[] = []): EmbedBuilder {
+  if (isConfirmedExit(e)) {
+    const reason =
+      e.state === 'final_target'
+        ? 'Final target reached.'
+        : e.state === 'invalidated'
+          ? `Completed 15m close ${e.direction === 'bullish' ? 'below' : 'above'} the invalidation level.`
+          : 'The strategy holding window ended.';
+    const geometry = referenceGeometry(e.candidate);
+    return new EmbedBuilder()
+      .setColor(e.state === 'invalidated' ? 0xef6571 : 0x22c6a8)
+      .setTitle(
+        `${e.direction === 'bullish' ? 'SELL RECOMMENDED NOW 💰' : 'EXIT RECOMMENDED NOW 💰'} · ${e.instrument.symbol}`,
+      )
+      .setDescription(
+        [
+          reason,
+          ...(e.observations ?? []),
+          'You may hold at your own discretion. Full exit reasoning is in the thread.',
+        ].join('\n'),
+      )
+      .addFields(
+        { name: 'Original entry reference', value: `$${price(geometry.entry)}`, inline: true },
+        { name: 'Invalidation level', value: `$${price(e.candidate.level)}`, inline: true },
+        { name: 'Final target', value: `$${price(geometry.target)}`, inline: true },
+        {
+          name: 'Data',
+          value: `Age at display: ${Math.max(0, (Date.now() - e.provenance.asOf) / 60000).toFixed(0)}m · feed minimum: ${e.provenance.delayMinutes}m\n${new Date(e.provenance.asOf).toISOString()}`,
+        },
+      )
+      .setTimestamp(e.marketTime)
+      .setFooter({
+        text: `Exit signal, not an execution · ${e.strategyVersion} · idea ${e.ideaId} · event ${e.id}`,
+      });
+  }
   if (e.state !== 'entry_triggered') return card(e, options);
   const c = e.candidate,
     geometry = referenceGeometry(c);

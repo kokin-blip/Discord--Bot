@@ -10,7 +10,7 @@ import type { Dataset, OptionsContext, Publisher, SignalEvent } from '../domain.
 import type { Store } from '../sql-store.js';
 import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
-import { buttons, card, publicCard, trackerCard } from './cards.js';
+import { buttons, card, publicCard, isConfirmedExit, trackerCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
 import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 export class DiscordPublisher implements Publisher {
@@ -194,7 +194,9 @@ export class DiscordPublisher implements Publisher {
     if (
       event.strategyVersion.startsWith('br-v1-') &&
       discussion?.thread &&
-      (discussion.message !== message.id || event.state === 'entry_triggered')
+      (discussion.message !== message.id ||
+        event.state === 'entry_triggered' ||
+        isConfirmedExit(event))
     ) {
       const thread = await this.client.channels.fetch(discussion.thread);
       if (!thread?.isThread()) throw new Error('IDEA_THREAD_UNAVAILABLE');

@@ -381,3 +381,23 @@ it.each(['bullish', 'bearish'] as const)(
     }
   },
 );
+
+it.each(['final_target', 'invalidated', 'time_exit'] as const)(
+  'shows a sell recommendation for bullish %s after entry, with discretion and ambiguity retained',
+  (state) => {
+    const e = events();
+    const exit = {
+      ...e.advanced.events.at(-1)!,
+      state,
+      observations: ['Target touched; intrabar ordering unknown'],
+    };
+    const embed = publicCard(exit).toJSON();
+    expect(embed.title).toContain('SELL RECOMMENDED NOW 💰');
+    expect(embed.description).toContain('You may hold at your own discretion.');
+    expect(embed.description).toContain('intrabar ordering unknown');
+    expect(embed.fields!.find((f) => f.name === 'Data')!.value).toContain('Age at display:');
+    expect(publicCard({ ...e.watching, state }).toJSON().title).not.toContain('SELL RECOMMENDED');
+    const bearish = { ...events('bearish').advanced.events.at(-1)!, state };
+    expect(publicCard(bearish).toJSON().title).toContain('EXIT RECOMMENDED NOW 💰');
+  },
+);
