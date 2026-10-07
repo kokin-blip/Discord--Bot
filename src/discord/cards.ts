@@ -27,7 +27,8 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
     )
     .setTitle(`${e.instrument.symbol} · ${e.direction.toUpperCase()} · ${stage}`)
     .setDescription(
-      [...new Set([...c.reasons, ...e.reasons]), ...(e.observations ?? [])]
+      [strategyOutcome(e), ...new Set([...c.reasons, ...e.reasons]), ...(e.observations ?? [])]
+        .filter(Boolean)
         .join('\n')
         .slice(0, 2000),
     )
@@ -105,6 +106,15 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
   return embed;
 }
 const signed = (n: number, suffix: string) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}${suffix}`;
+function strategyOutcome(e: SignalEvent): string {
+  if (e.state === 'invalidated')
+    return '**Callout was wrong:** price invalidated the expected direction.';
+  if (e.state === 'expired')
+    return '**Setup callout did not qualify for entry:** the entry requirements or confirmation window failed. No confirmed entry.';
+  if (e.state === 'time_exit' && (e.performance?.changePercent ?? 0) < 0)
+    return '**Callout was wrong:** the holding window ended with an unfavorable move from the entry reference.';
+  return '';
+}
 function performanceText(e: SignalEvent): string {
   const p = e.performance!;
   return `${signed(p.changePercent, '%')} · ${signed(p.rMultiple, 'R')}\nLatest completed close: $${price(p.referencePrice)}\nDirectional move from entry reference; not realized P/L.${p.ambiguous ? ' Intrabar ordering unknown.' : ''}`;
@@ -176,10 +186,13 @@ export function publicCard(e: SignalEvent, options: OptionsContext[] = []): Embe
       )
       .setDescription(
         [
+          strategyOutcome(e),
           reason,
           ...(e.observations ?? []),
           'You may hold at your own discretion. Full exit reasoning is in the thread.',
-        ].join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
       )
       .addFields(
         { name: 'Original entry reference', value: `$${price(geometry.entry)}`, inline: true },
@@ -272,7 +285,7 @@ export function trackerCard(e: SignalEvent): EmbedBuilder {
     .setDescription(
       t.type === 'volume'
         ? `${e.debug ? 'DELIVERY TEST ONLY: invented prices and volume. ' : ''}Unusual market activity; this is not a trade entry signal. Pressure is estimated from candle direction, not measured buyer/seller volume.`
-        : 'Experimental market-structure tracker; separate from the breakout strategy. This is not a trade entry signal.',
+        : `${t.phase === 'cancelled' ? '**Callout was wrong:** price crossed the cancellation level, invalidating the expected reversal.\n' : t.phase === 'expired' ? '**Reversal callout did not confirm:** the expected reversal was not confirmed within the allowed window.\n' : ''}Experimental market-structure tracker; separate from the breakout strategy. This is not a trade entry signal.`,
     )
     .addFields({ name: 'Closing price', value: price(t.close), inline: true });
   if (t.type === 'volume')

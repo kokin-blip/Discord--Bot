@@ -28,6 +28,13 @@ it.each(['bullish', 'bearish'] as const)(
         Date.now(),
       );
       const embed = trackerCard(event).toJSON();
+      if (phase === 'cancelled') {
+        expect(embed.title).toContain('CANCELLED');
+        expect(embed.description).toContain('Callout was wrong');
+      } else {
+        expect(embed.description).not.toContain('Callout was wrong');
+        if (phase === 'expired') expect(embed.description).toContain('did not confirm');
+      }
       const field = embed.fields!.find((f) => f.name === 'Hypothetical move since warning')!;
       expect(field.value).toContain('+10.00%');
       expect(field.value).toContain(`${direction === 'bullish' ? 'long' : 'short'} direction`);

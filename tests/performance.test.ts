@@ -3,7 +3,7 @@ import { fixture, idea } from './fixtures.js';
 import { advance } from '../src/core/strategy.js';
 import { defaults } from '../src/config.js';
 import { QUARTER } from '../src/core/time.js';
-import { publicCard } from '../src/discord/cards.js';
+import { publicCard, card } from '../src/discord/cards.js';
 import { Store } from '../src/storage.js';
 
 it.each(['bullish', 'bearish'] as const)(
@@ -78,6 +78,8 @@ it.each(['bullish', 'bearish'] as const)(
     expect(event.performance!.reachedTargets).toEqual([]);
     const embed = publicCard(event).toJSON();
     expect(embed.description).toContain('ordering unknown');
+    expect(embed.description).toContain('Callout was wrong');
+    expect(card(event).toJSON().description).toContain('Callout was wrong');
     expect(embed.fields!.find((f) => f.name === 'Target progress')!.value).not.toContain('~~');
   },
 );
@@ -90,4 +92,22 @@ it('omits unknown performance in older exit events instead of inventing a price'
       .toJSON()
       .fields!.some((f) => f.name === 'Signal performance'),
   ).toBe(false);
+});
+it('labels losing time exits honestly without calling profitable or unknown exits wrong', () => {
+  const data = fixture(),
+    initial = advance(idea(data), data, defaults, data.provenance.asOf);
+  const event = { ...initial.events.at(-1)!, state: 'time_exit' as const };
+  for (const changePercent of [-2, 2]) {
+    const exit = { ...event, performance: { ...event.performance!, changePercent } };
+    expect(publicCard(exit).toJSON().description?.includes('Callout was wrong')).toBe(
+      changePercent < 0,
+    );
+    expect(card(exit).toJSON().description?.includes('Callout was wrong')).toBe(changePercent < 0);
+  }
+  expect(publicCard({ ...event, performance: undefined }).toJSON().description).not.toContain(
+    'Callout was wrong',
+  );
+  expect(
+    card({ ...event, state: 'expired', performance: undefined }).toJSON().description,
+  ).toContain('did not qualify for entry');
 });
