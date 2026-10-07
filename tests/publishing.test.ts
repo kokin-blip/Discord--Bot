@@ -99,7 +99,7 @@ it.each(['bullish', 'bearish'] as const)(
       expect(h.thread.send).toHaveBeenCalledTimes(2);
       expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('AWAITING RETEST');
       expect(h.main.send.mock.calls[2][0].embeds[0].toJSON().title).toContain(
-        direction === 'bullish' ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅',
+        direction === 'bullish' ? 'BUY IN NOW ✅' : 'BUY IN NOW ❎ · SHORT',
       );
       expect(h.thread.send.mock.calls.every((c: any) => c[0].files === undefined)).toBe(true);
       const root = await h.main.messages.fetch(store.thread(e.original.candidate.id)!.message);
@@ -361,8 +361,15 @@ it.each(['bullish', 'bearish'] as const)(
       await h.publisher.deliver(entry, 'main');
       const main = h.main.send.mock.calls[0][0].embeds[0].toJSON();
       const detail = h.thread.send.mock.calls[0][0].embeds[0].toJSON();
-      expect(main.title).toContain(direction === 'bullish' ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅');
+      expect(main.title).toContain(
+        direction === 'bullish' ? 'BUY IN NOW ✅' : 'BUY IN NOW ❎ · SHORT',
+      );
       expect(main.fields.some((f: any) => f.name === 'Interpretation')).toBe(false);
+      if (direction === 'bearish') {
+        expect(main.description).toContain('Recommended SHORT position');
+        expect(main.description).toContain('not a long purchase');
+        expect(main.description).toContain('spot short availability is not implied');
+      }
       expect(main.fields.find((f: any) => f.name === 'Data').value).toContain('Age at display:');
       expect(main.fields.find((f: any) => f.name === 'R/R').value).toBe('3:1');
       expect(

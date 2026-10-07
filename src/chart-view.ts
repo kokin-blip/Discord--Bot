@@ -36,7 +36,7 @@ export function chartView(data: Dataset, candidate?: Candidate, event?: SignalEv
         : event?.state === 'entry_triggered'
           ? event.direction === 'bullish'
             ? 'BUY'
-            : 'Bearish entry'
+            : 'SHORT'
           : event?.state === 'setup_ready'
             ? 'Retest ready'
             : event?.state === 'watching'

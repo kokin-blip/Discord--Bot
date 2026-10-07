@@ -154,9 +154,9 @@ export function publicCard(e: SignalEvent, options: OptionsContext[] = []): Embe
   const minimum = bullish ? Math.max(lower, c.retest?.high ?? lower) : lower;
   return new EmbedBuilder()
     .setColor(bullish ? 0x22c6a8 : 0xe9b35d)
-    .setTitle(`${bullish ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅'} · ${e.instrument.symbol}`)
+    .setTitle(`${bullish ? 'BUY IN NOW ✅' : 'BUY IN NOW ❎ · SHORT'} · ${e.instrument.symbol}`)
     .setDescription(
-      `Completed 15m close confirmed the ${bullish ? 'breakout' : 'breakdown'} retest. Volume, trend and reward/risk checks passed. Full reasoning in the thread.`,
+      `${bullish ? '' : 'Recommended SHORT position — not a long purchase. '}${!bullish && e.instrument.market === 'crypto' ? 'Directional thesis; spot short availability is not implied. ' : ''}Completed 15m close confirmed the ${bullish ? 'breakout' : 'breakdown'} retest. Volume, trend and reward/risk checks passed. Full reasoning in the thread.`,
     )
     .addFields(
       { name: 'Entry reference', value: `$${price(geometry.entry)}`, inline: true },

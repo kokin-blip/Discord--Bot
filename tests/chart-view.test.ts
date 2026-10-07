@@ -19,7 +19,7 @@ it.each(['bullish', 'bearish'] as const)(
     expect(view.intraday).toBe(true);
     expect(view.call?.end).toBe(event.marketTime);
     expect(view.bars.every((b) => b.end <= event.marketTime)).toBe(true);
-    expect(view.label).toBe(direction === 'bullish' ? 'BUY' : 'Bearish entry');
+    expect(view.label).toBe(direction === 'bullish' ? 'BUY' : 'SHORT');
     const exit = { ...event, state: 'invalidated' as const };
     expect(chartView(data, exit.candidate, exit).label).toBe(
       direction === 'bullish' ? 'SELL' : 'EXIT',
