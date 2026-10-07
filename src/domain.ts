@@ -83,7 +83,10 @@ export interface SignalEvent {
     basis: 'completed_close';
     ambiguous: boolean;
   };
-  kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker';
+  kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker' | 'learning_review' | 'learning_report';
+  learning?: LearningFeatures;
+  learningText?: string;
+  sourceEventId?: string;
   tracker?: TrackerDetails;
   setupContext?: { entryBand: [number, number]; remainingSessions: number; totalSessions: number };
   id: string;
@@ -176,3 +179,26 @@ export type TrackerDetails =
       confirmationBars: number;
       close: number;
     };
+
+export interface LearningFeatures {
+  at: number;
+  close?: number;
+  benchmarkTrend: 'up' | 'down' | 'flat' | 'unknown';
+  benchmarkAgreement: boolean;
+  dailyRelativeVolume?: number;
+  intradayRelativeVolume?: number;
+  pressure?: 'buying' | 'selling' | 'neutral';
+  pressureBasis?: 'candle_direction';
+  frozenHigh?: number;
+  frozenLow?: number;
+  cancellationLevel?: number;
+  breakoutRelativeVolume?: number;
+  breakoutThreshold?: number;
+  relativeStrength?: number;
+  atr?: number;
+  level?: number;
+  entry?: number;
+  targets?: number[];
+  rewardRisk?: number;
+  entryGeometry?: 'provisional' | 'confirmed';
+}

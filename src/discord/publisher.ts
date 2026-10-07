@@ -10,7 +10,7 @@ import type { Dataset, OptionsContext, Publisher, SignalEvent } from '../domain.
 import type { Store } from '../sql-store.js';
 import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
-import { buttons, card, publicCard, isConfirmedExit, trackerCard } from './cards.js';
+import { buttons, card, publicCard, isConfirmedExit, trackerCard, learningCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
 import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 export class DiscordPublisher implements Publisher {
@@ -51,6 +51,39 @@ export class DiscordPublisher implements Publisher {
   }
   async deliver(event: SignalEvent, destination: string, snapshot?: Dataset): Promise<void> {
     if (this.store.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
+    if (event.kind === 'learning_review') {
+      const source = this.store.db
+        .prepare('SELECT status FROM outbox WHERE event_id=?')
+        .get(event.sourceEventId ?? '') as { status: string } | undefined;
+      if (source?.status !== 'delivered') throw new Error('FAILURE_ALERT_NOT_DELIVERED');
+      const discussion = this.store.thread(event.ideaId);
+      if (!discussion?.thread) throw new Error('FAILURE_THREAD_NOT_READY');
+      const thread = await this.client.channels.fetch(discussion.thread);
+      if (!thread?.isThread() || thread.guildId !== this.guildId)
+        throw new Error('FAILURE_THREAD_UNAVAILABLE');
+      if (this.store.receipt(event.id, thread.id)) return;
+      if (thread.archived) await thread.setArchived(false);
+      const recent = await thread.messages.fetch({ limit: 100 });
+      const found = recent.find(
+        (m) =>
+          m.author.id === this.client.user?.id &&
+          m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
+      );
+      const message =
+        found ??
+        (await thread.send({
+          embeds: [learningCard(event)],
+          allowedMentions: { parse: [] },
+          nonce: BigInt(`0x${stableId(event.id, thread.id).slice(0, 16)}`).toString(),
+          enforceNonce: true,
+        }));
+      this.store.saveReceipt(event.id, thread.id, message.id);
+      return;
+    }
+    const threaded =
+      !event.debug &&
+      event.kind !== 'learning_report' &&
+      (event.strategyVersion.startsWith('br-v1-') || event.tracker?.type === 'reversal');
     const channel = await this.validate(destination),
       existing = this.store.thread(event.ideaId);
     const target = channel,
@@ -67,7 +100,8 @@ export class DiscordPublisher implements Publisher {
     if (!message) {
       let dataset: Dataset | undefined;
       try {
-        dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
+        if (event.kind !== 'learning_report')
+          dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
       } catch {}
       if (
         event.instrument.market === 'equity' &&
@@ -79,22 +113,24 @@ export class DiscordPublisher implements Publisher {
         } catch {}
       }
       const embed =
-        event.kind === 'watch_tracker'
-          ? trackerCard(event)
-          : event.strategyVersion === 'system'
-            ? new EmbedBuilder()
-                .setTitle('Bot update')
-                .setDescription(event.reasons.join('\n'))
-                .setFooter({ text: `event ${event.id}` })
-            : event.strategyVersion === 'watch-alert-v1'
+        event.kind === 'learning_report'
+          ? learningCard(event)
+          : event.kind === 'watch_tracker'
+            ? trackerCard(event)
+            : event.strategyVersion === 'system'
               ? new EmbedBuilder()
-                  .setTitle(`${event.instrument.symbol} · Watchlist change`)
-                  .setDescription(
-                    `${event.reasons.join('\n')}\n${event.provenance.feed} · data ${new Date(event.marketTime).toISOString()} · ${Math.max(0, (Date.now() - event.marketTime) / 60000).toFixed(0)}m old (feed minimum ${event.provenance.delayMinutes}m)`,
-                  )
-                  .setTimestamp(event.marketTime)
+                  .setTitle('Bot update')
+                  .setDescription(event.reasons.join('\n'))
                   .setFooter({ text: `event ${event.id}` })
-              : publicCard(event, options);
+              : event.strategyVersion === 'watch-alert-v1'
+                ? new EmbedBuilder()
+                    .setTitle(`${event.instrument.symbol} · Watchlist change`)
+                    .setDescription(
+                      `${event.reasons.join('\n')}\n${event.provenance.feed} · data ${new Date(event.marketTime).toISOString()} · ${Math.max(0, (Date.now() - event.marketTime) / 60000).toFixed(0)}m old (feed minimum ${event.provenance.delayMinutes}m)`,
+                    )
+                    .setTimestamp(event.marketTime)
+                    .setFooter({ text: `event ${event.id}` })
+                : publicCard(event, options);
       let image: Buffer | undefined;
       if (
         dataset &&
@@ -152,7 +188,16 @@ export class DiscordPublisher implements Publisher {
       message = await target.send({
         embeds: [embed],
         components: event.strategyVersion === 'system' ? [] : [buttons(event)],
-        files: image ? [new AttachmentBuilder(image, { name: imageName })] : [],
+        files:
+          event.kind === 'learning_report'
+            ? [
+                new AttachmentBuilder(Buffer.from(event.learningText!), {
+                  name: 'learning-report.txt',
+                }),
+              ]
+            : image
+              ? [new AttachmentBuilder(image, { name: imageName })]
+              : [],
         allowedMentions: { parse: [] },
         nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
         enforceNonce: true,
@@ -168,7 +213,7 @@ export class DiscordPublisher implements Publisher {
         chartAttached: message.embeds.some((e) => !!e.image?.url),
         chartStyleVersion: CHART_STYLE_VERSION,
       });
-    if (!existing && event.strategyVersion.startsWith('br-v1-')) {
+    if (!existing && threaded) {
       this.store.saveThread(event.ideaId, destination, message.id);
       const thread = message.hasThread
         ? await this.client.channels.fetch(message.id)
@@ -178,7 +223,7 @@ export class DiscordPublisher implements Publisher {
           });
       if (!thread?.isThread()) throw new Error('IDEA_THREAD_UNAVAILABLE');
       this.store.saveThread(event.ideaId, destination, message.id, thread?.id);
-    } else if (existing && !existing.thread && event.strategyVersion.startsWith('br-v1-')) {
+    } else if (existing && !existing.thread && threaded) {
       const originalChannel = await this.validate(existing.channel);
       const original = await originalChannel.messages.fetch(existing.message);
       const thread = original.hasThread
@@ -192,7 +237,7 @@ export class DiscordPublisher implements Publisher {
     }
     const discussion = this.store.thread(event.ideaId);
     if (
-      event.strategyVersion.startsWith('br-v1-') &&
+      threaded &&
       discussion?.thread &&
       (discussion.message !== message.id ||
         event.state === 'entry_triggered' ||
@@ -210,7 +255,9 @@ export class DiscordPublisher implements Publisher {
               m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
           ) ??
           (await thread.send({
-            embeds: [card(event, options)],
+            embeds: [
+              event.tracker?.type === 'reversal' ? trackerCard(event) : card(event, options),
+            ],
             components: [buttons(event)],
             allowedMentions: { parse: [] },
             nonce: BigInt(`0x${stableId(event.id, thread.id).slice(0, 16)}`).toString(),

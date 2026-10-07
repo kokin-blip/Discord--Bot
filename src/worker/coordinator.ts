@@ -1,3 +1,4 @@
+import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import {
   ChatInputCommandInteraction,
@@ -139,6 +140,20 @@ export class SignalCoordinator {
           stage = 'scan';
           await this.service.scan(now, force);
           this.store.set('last_poll', now);
+        }
+        const usage = this.store.get('cloud_usage', { reads: 0, writes: 0, requests: 0 });
+        this.store.set(
+          'learning_paused',
+          usage.reads >= 3_600_000 ||
+            usage.writes >= 72_000 ||
+            usage.requests >= 72_000 ||
+            this.budget.status().storageBytes >= 3_600_000_000,
+        );
+        try {
+          new Learning(this.store).process(now);
+          this.store.set('learning_error', null);
+        } catch (error) {
+          this.store.set('learning_error', diagnosticCode(error));
         }
         stage = 'publication';
         if (this.store.settings().paused) return new Response('Paused');

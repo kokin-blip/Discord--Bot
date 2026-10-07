@@ -1,3 +1,6 @@
+import { stableId } from './core/strategy.js';
+import { currentReversal } from './reversal-config.js';
+import { learningFeatures, agrees, benchmarkTrend } from './core/learning-features.js';
 import type { Dataset, SignalEvent, Candidate } from './domain.js';
 import type { Store } from './sql-store.js';
 import {
@@ -59,29 +62,54 @@ export function trackWatchlist(store: Store, data: Dataset, now: number, recover
         // A pending warning owns this candle; no second warning on its terminal candle.
         if (cursor.pending) {
           const announced = cursor.pending.announced;
+          const version = cursor.pending.strategyVersion ?? 'watch-tracker-v1';
           const result = advanceReversal(cursor.pending, timeframe, bar);
           cursor = { lastBar: bar.end, ...(result.pending ? { pending: result.pending } : {}) };
-          if (result.observation && announced && publicBar && settings.reversals)
-            emit(result.observation);
+          if (result.observation && announced) {
+            const event = trackerEvent(data, result.observation, now, version);
+            if (publicBar && settings.reversals) store.enqueue(event, 'watchlist');
+            else {
+              event.recovery = true;
+              store.recordEvent(event);
+            }
+          }
         } else {
-          const pending = reversalWarning(
+          let pending = reversalWarning(
             data.instrument.id,
             timeframe,
             bars.slice(Math.max(0, n - 60), n),
             bar,
           );
+          const reversal = currentReversal(store);
+          if (
+            pending &&
+            reversal.config.benchmarkAgreement &&
+            !agrees(benchmarkTrend(data, bar.end), pending.direction)
+          )
+            pending = undefined;
           if (pending) {
+            pending.id = stableId(pending.id, reversal.version);
+            pending.strategyVersion = reversal.version;
+            pending.confirmationBars = reversal.config.confirmationBars;
             pending.announced =
               publicBar &&
               settings.reversals &&
               store.cooldown(`${key}:reversal:${pending.direction}`, bar.end);
             if (pending.announced)
-              emit({
-                id: pending.id,
-                direction: pending.direction,
-                bar,
-                details: reversalDetails(pending, timeframe, 'warning', bar.close),
-              });
+              store.enqueue(
+                trackerEvent(
+                  data,
+                  {
+                    id: pending.id,
+                    direction: pending.direction,
+                    bar,
+                    details: reversalDetails(pending, timeframe, 'warning', bar.close),
+                  },
+                  now,
+                  pending.strategyVersion,
+                ),
+                'watchlist',
+              );
           }
           cursor = { lastBar: bar.end, ...(pending ? { pending } : {}) };
         }
@@ -94,8 +122,11 @@ export function trackerEvent(
   data: Dataset,
   observation: TrackerObservation,
   now: number,
+  version = 'watch-tracker-v1',
 ): SignalEvent {
   const { id, direction, bar, details } = observation;
+  const volume =
+    details.timeframe === '15m' ? volumeSpike(data, '15m', bar, 0, 10)?.details : undefined;
   const reasons = [
     details.type === 'volume'
       ? 'Unusual completed-candle volume'
@@ -106,7 +137,7 @@ export function trackerEvent(
     id,
     instrument: data.instrument,
     direction,
-    strategyVersion: 'watch-tracker-v1',
+    strategyVersion: version,
     breakout: bar,
     level: 0,
     baseHigh: 0,
@@ -119,6 +150,19 @@ export function trackerEvent(
   };
   return {
     kind: 'watch_tracker',
+    learning: {
+      ...learningFeatures(data, bar.end, direction),
+      ...(details.type === 'reversal'
+        ? {
+            frozenHigh: details.frozenHigh,
+            frozenLow: details.frozenLow,
+            cancellationLevel: details.cancellationLevel,
+          }
+        : {}),
+      ...(volume?.type === 'volume' ? { intradayRelativeVolume: volume.relativeVolume } : {}),
+      pressure: bar.close > bar.open ? 'buying' : bar.close < bar.open ? 'selling' : 'neutral',
+      pressureBasis: 'candle_direction',
+    },
     tracker: details,
     id,
     ideaId: details.type === 'reversal' ? details.warningId : id,

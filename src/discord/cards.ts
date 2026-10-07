@@ -348,3 +348,14 @@ export function trackerCard(e: SignalEvent): EmbedBuilder {
     .setTimestamp(e.marketTime)
     .setFooter({ text: `${e.strategyVersion} · event ${e.id}` });
 }
+
+export function learningCard(e: SignalEvent): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(
+      `${e.debug ? 'SYNTHETIC PREVIEW · ' : ''}${e.kind === 'learning_report' ? 'Weekly learning report' : `${e.instrument.symbol} · Failure review`}`,
+    )
+    .setDescription((e.learningText ?? '').slice(0, 4000))
+    .setColor(e.kind === 'learning_review' ? 0xef6571 : 0x87939d)
+    .setTimestamp(e.marketTime)
+    .setFooter({ text: `event ${e.id}` });
+}

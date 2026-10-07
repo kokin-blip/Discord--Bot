@@ -9,6 +9,7 @@ import {
   strategySchema,
 } from './config.js';
 import { strategyVersion } from './core/strategy.js';
+import { currentReversal, saveReversal } from './reversal-config.js';
 type Row = Record<string, string | number | null>;
 export interface SqlDatabase {
   mode?: string;
@@ -33,12 +34,19 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'Event journal is append-only'); END;
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Event journal is append-only'); END;
       CREATE TABLE IF NOT EXISTS outbox(event_id TEXT PRIMARY KEY REFERENCES events(id),route TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT);
+      CREATE INDEX IF NOT EXISTS outbox_ready ON outbox(status,next_attempt);
       CREATE TABLE IF NOT EXISTS threads(idea_id TEXT PRIMARY KEY,channel_id TEXT NOT NULL,message_id TEXT NOT NULL,thread_id TEXT);
       CREATE TABLE IF NOT EXISTS delivery_receipts(event_id TEXT NOT NULL REFERENCES events(id),destination TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(event_id,destination));
       CREATE TABLE IF NOT EXISTS cooldowns(key TEXT PRIMARY KEY,time INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS reversal_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learning_pending(id TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learning_cases(id TEXT PRIMARY KEY,resolved INTEGER NOT NULL,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learning_counts(key TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learning_experiments(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS strategy_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
       ${this.db.mode === 'cloud' ? '' : 'PRAGMA user_version=1;'} `);
     this.saveStrategy(this.strategy());
+    saveReversal(this, currentReversal(this).config);
   }
   close() {
     this.db.close();
@@ -260,7 +268,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? ORDER BY e.seq LIMIT 25",
+          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? ORDER BY CASE WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report') THEN 1 ELSE 0 END,e.seq LIMIT 25",
         )
         .all(now) as Row[]
     ).map((r) => ({

@@ -408,3 +408,102 @@ it.each(['final_target', 'invalidated', 'time_exit'] as const)(
     expect(publicCard(bearish).toJSON().title).toContain('EXIT RECOMMENDED NOW 💰');
   },
 );
+
+it('creates one reversal discussion thread and sends a failure review only after its public failure delivery', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      { watching } = events();
+    const warning: SignalEvent = {
+      ...watching,
+      id: 'reversal-warning',
+      ideaId: 'warning-id',
+      kind: 'watch_tracker',
+      strategyVersion: 'reversal-v1-test',
+      tracker: {
+        type: 'reversal',
+        timeframe: '15m',
+        phase: 'warning',
+        warningId: 'warning-id',
+        warningTime: watching.marketTime,
+        warningClose: 100,
+        frozenHigh: 110,
+        frozenLow: 90,
+        cancellationLevel: 95,
+        elapsed: 0,
+        confirmationBars: 5,
+        close: 100,
+      },
+    };
+    store.enqueue(warning, 'watchlist');
+    await h.publisher.deliver(warning, 'main');
+    store.delivered(warning.id);
+    const cancelled: SignalEvent = {
+      ...warning,
+      id: 'reversal-cancel',
+      tracker: {
+        ...(warning.tracker as Extract<NonNullable<SignalEvent['tracker']>, { type: 'reversal' }>),
+        phase: 'cancelled',
+        close: 94,
+      },
+    };
+    store.enqueue(cancelled, 'watchlist');
+    const review: SignalEvent = {
+      ...cancelled,
+      id: 'failure-review',
+      kind: 'learning_review',
+      sourceEventId: cancelled.id,
+      learningText:
+        'Callout was wrong. Observed failure: price crossed the cancellation level. Hypothesis to test: benchmark alignment. Association, not a proven cause.',
+    };
+    store.enqueue(review, 'updates');
+    await expect(h.publisher.deliver(review, 'updates')).rejects.toThrow(
+      'FAILURE_ALERT_NOT_DELIVERED',
+    );
+    await h.publisher.deliver(cancelled, 'main');
+    store.delivered(cancelled.id);
+    const chartCalls = h.charts.render.mock.calls.length;
+    h.thread.send.mockRejectedValueOnce(new Error('network unavailable'));
+    await expect(h.publisher.deliver(review, 'updates')).rejects.toThrow('network unavailable');
+    await h.publisher.deliver(review, 'updates');
+    await h.publisher.deliver(review, 'updates');
+    await h.publisher.deliver(cancelled, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(2);
+    expect(h.updates.send).not.toHaveBeenCalled();
+    const root = await h.main.messages.fetch(store.thread('warning-id')!.message);
+    expect(root.startThread).toHaveBeenCalledTimes(1);
+    expect(
+      h.thread.send.mock.calls.filter((c: any) =>
+        c[0].embeds[0].toJSON().title.includes('Failure review'),
+      ),
+    ).toHaveLength(2); // failed attempt + successful retry
+    expect(store.receipt(review.id, 'thread')).toBeTruthy();
+    expect(h.charts.render).toHaveBeenCalledTimes(chartCalls);
+  } finally {
+    store.close();
+  }
+});
+it('delivers weekly reports without charts or threads and attaches the complete text', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      { watching } = events();
+    const e: SignalEvent = {
+      ...watching,
+      id: 'report',
+      ideaId: 'report',
+      strategyVersion: 'system',
+      kind: 'learning_report',
+      learningText: 'Weekly aggregate report\n' + 'Observed association. '.repeat(300),
+    };
+    store.enqueue(e, 'summaries');
+    await h.publisher.deliver(e, 'main');
+    await h.publisher.deliver(e, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(store.thread(e.ideaId)).toBeUndefined();
+    expect(h.main.send.mock.calls[0][0].files[0].attachment.toString()).toBe(e.learningText);
+  } finally {
+    store.close();
+  }
+});

@@ -36,6 +36,10 @@ Copy `.env.example` to `.env` for registration/preflight tools and `.dev.vars.ex
 
 All members can inspect; administrators or the configured manager role change shared lists/settings. Only administrators can grant the manager role or attest to validation. In test mode, all automatic messages go to `TEST_CHANNEL_ID`. Production requires all six destinations, permissions, historical-review attestation, and seven consecutive healthy days in test mode.
 
+## Controlled learning
+
+Failure reviews explain observed failures in each callout’s thread. Detailed learning examples retain failures and exceptional successful entries; ordinary outcomes contribute aggregate counts. Weekly reports describe associations, and silent experiments test stricter filters without changing public signals. Use `/learning report`, `/learning cases`, `/learning experiments`, and manager/admin-only `/learning promote` or `/learning rollback`. Promotion remains human-controlled and versioned. See [learning rules and validation](docs/LEARNING.md).
+
 ## Behavior
 
 Watched symbols automatically publish qualified breakouts, daily retest readiness, and confirmed entries to their equity/crypto ideas channel. Each idea has one discussion thread; later cards stay visible in the main channel and their details are mirrored into the thread. Milestones and terminal outcomes use the updates channel. Before entry, cards and charts label the 0.5-ATR ranking reference, targets, and R/R as hypothetical; the actual retest trigger, allowed entry band, and remaining session window are separate. At entry, levels are finalized from the confirming close, which is a signal reference rather than a fill.

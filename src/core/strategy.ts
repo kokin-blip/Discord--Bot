@@ -1,3 +1,5 @@
+import { referenceGeometry } from './geometry.js';
+import { learningFeatures } from './learning-features.js';
 import { createHash } from 'node:crypto';
 import type { Bar, Candidate, Dataset, Direction, Idea, SignalEvent, State } from '../domain.js';
 import { terminalStates } from '../domain.js';
@@ -193,6 +195,18 @@ export function makeEvent(
       : undefined;
   return {
     kind: 'lifecycle',
+    learning: {
+      ...learningFeatures(data, marketTime, candidate.direction),
+      breakoutRelativeVolume: candidate.relativeVolume,
+      breakoutThreshold: config.breakoutVolume,
+      relativeStrength: candidate.relativeStrength,
+      atr: candidate.atr,
+      level: candidate.level,
+      entry: referenceGeometry(candidate).entry,
+      targets: referenceGeometry(candidate).targets,
+      rewardRisk: referenceGeometry(candidate).rr,
+      entryGeometry: candidate.entry === undefined ? 'provisional' : 'confirmed',
+    },
     performance,
     setupContext:
       candidate.entry === undefined

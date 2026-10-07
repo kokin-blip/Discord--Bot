@@ -1,5 +1,7 @@
+import { Learning } from '../learning.js';
 import {
   ChannelType,
+  EmbedBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
@@ -180,6 +182,19 @@ commands.push(
         .setDescription('Send a labeled synthetic chart alert to the private test channel'),
     ),
 );
+const learning = new SlashCommandBuilder()
+  .setName('learning')
+  .setDescription('Inspect learning reviews and control experimental filters');
+for (const action of ['report', 'cases', 'experiments'])
+  learning.addSubcommand((s) => s.setName(action).setDescription(`Inspect learning ${action}`));
+for (const action of ['promote', 'rollback'])
+  learning.addSubcommand((s) =>
+    s
+      .setName(action)
+      .setDescription(`${action} a reviewed experiment`)
+      .addStringOption((o) => o.setName('id').setDescription('Experiment ID').setRequired(true)),
+  );
+commands.push(learning);
 export function authorized(admin: boolean, roles: string[], manager?: string) {
   return admin || (!!manager && roles.includes(manager));
 }
@@ -214,7 +229,8 @@ export class CommandHandler {
       readOnly =
         ['chart', 'idea', 'status'].includes(i.commandName) ||
         (i.commandName === 'watch' && sub === 'list') ||
-        (i.commandName === 'debug' && sub === 'check');
+        (i.commandName === 'debug' && sub === 'check') ||
+        (i.commandName === 'learning' && ['report', 'cases', 'experiments'].includes(sub ?? ''));
     const member = await i.guild!.members.fetch(i.user.id),
       admin = member.permissions.has(PermissionFlagsBits.Administrator);
     if (
@@ -234,11 +250,65 @@ export class CommandHandler {
       if (
         this.budget.status().paused &&
         i.commandName !== 'status' &&
-        !(i.commandName === 'debug' && sub === 'check')
+        !(i.commandName === 'debug' && sub === 'check') &&
+        !(i.commandName === 'learning' && readOnly)
       )
         throw new Error(
           'Free-plan resource budget exhausted; scanning and publication remain paused.',
         );
+      if (i.commandName === 'learning') {
+        const learning = new Learning(this.store);
+        if (sub === 'promote' || sub === 'rollback') {
+          const id = i.options.getString('id', true);
+          const version =
+            sub === 'promote' ? learning.promote(id, Date.now()) : learning.rollback(id);
+          this.store.set('learning_last_review', {
+            user: i.user.id,
+            experiment: id,
+            action: sub,
+            version,
+            at: Date.now(),
+          });
+          await i.editReply(
+            `${sub}: ${version}. Open calls retain their original rules. Historical validation and the private-channel soak must pass before production publication.`,
+          );
+        } else {
+          const result =
+            sub === 'report'
+              ? learning.report()
+              : JSON.stringify(
+                  sub === 'cases'
+                    ? learning.cases()
+                    : learning.experiments().map((e) => ({
+                        ...e,
+                        reviewReady: learning.ready(e, Date.now()),
+                        avoidedFailures: e.blocked.failure,
+                        blockedSuccessfulCalls: e.blocked.success,
+                        retainedOutcomes: e.pass,
+                        interpretation:
+                          'Counterfactual filter counts from original call lifecycles; not profitability evidence.',
+                        coverage:
+                          (e.pass.failure + e.pass.success) /
+                            (e.pass.failure +
+                              e.pass.success +
+                              e.blocked.failure +
+                              e.blocked.success) || 0,
+                      })),
+                  null,
+                  2,
+                );
+          await i.editReply({
+            content: `Learning ${sub} · observational evidence, not proof of profitability.`,
+            files: [
+              {
+                attachment: Buffer.from(result),
+                name: `learning-${sub}.${sub === 'report' ? 'txt' : 'json'}`,
+              },
+            ],
+          });
+        }
+        return;
+      }
       if (i.commandName === 'debug') {
         if (sub === 'check') {
           const report = debugReport(
@@ -422,53 +492,60 @@ export class CommandHandler {
             offset: number;
             listed: Instrument[];
           } | null>('discovery_progress', null);
-        await i.editReply(
-          JSON.stringify(
-            {
-              runtimeVersion: this.runtimeVersion,
-              chartStyleVersion: CHART_STYLE_VERSION,
-              commandRegistration: {
-                ...this.store.get<object>('command_registration_details', {}),
-                error: this.store.get('command_registration_error', null),
-              },
-              paused: this.store.settings().paused,
-              running: this.service.running,
-              lastScan: this.store.get('last_scan', null),
-              lastError: this.store.get('last_error', null),
-              lastErrorStage: this.store.get('last_error_stage', null),
-              coinbaseError:
-                (this.store.get<{ at: number } | null>('coinbase_error', null)?.at ?? 0) >
-                this.store.get('last_scan', 0)
-                  ? this.store.get('coinbase_error', null)
-                  : null,
-              discoveryError: this.store.get('discovery_error', null),
-              coinbaseRetryAt:
-                Math.max(0, this.store.get('retry_after:api.exchange.coinbase.com', 0)) > Date.now()
-                  ? this.store.get('retry_after:api.exchange.coinbase.com', 0)
-                  : null,
-              scanProgress: this.store.get('scan_progress', null),
-              requestedScanPending: this.store.get('scan_announcement', null) !== null,
-              discovery: discovery
-                ? {
-                    market: discovery.market,
-                    processed: discovery.offset,
-                    total: discovery.listed.length,
-                  }
-                : null,
-              pendingDeliveries: this.store.pendingCount(),
-              activeIdeas: this.store.activeIdeas().length,
-              activeEntries: this.store.activeEntries(),
-              soakStarted: this.store.get('soak_start', null),
-              budget,
-              instruments: monitored.map((x) => ({
-                symbol: x.symbol,
-                pausedReason: this.store.get(`quality:${x.id}`, null),
-                dataTime: this.store.get(`freshness:${x.id}`, null),
-              })),
+        const status = JSON.stringify(
+          {
+            runtimeVersion: this.runtimeVersion,
+            chartStyleVersion: CHART_STYLE_VERSION,
+            commandRegistration: {
+              ...this.store.get<object>('command_registration_details', {}),
+              error: this.store.get('command_registration_error', null),
             },
-            null,
-            2,
-          ).slice(0, 1950),
+            paused: this.store.settings().paused,
+            running: this.service.running,
+            lastScan: this.store.get('last_scan', null),
+            lastError: this.store.get('last_error', null),
+            lastErrorStage: this.store.get('last_error_stage', null),
+            coinbaseError:
+              (this.store.get<{ at: number } | null>('coinbase_error', null)?.at ?? 0) >
+              this.store.get('last_scan', 0)
+                ? this.store.get('coinbase_error', null)
+                : null,
+            discoveryError: this.store.get('discovery_error', null),
+            coinbaseRetryAt:
+              Math.max(0, this.store.get('retry_after:api.exchange.coinbase.com', 0)) > Date.now()
+                ? this.store.get('retry_after:api.exchange.coinbase.com', 0)
+                : null,
+            scanProgress: this.store.get('scan_progress', null),
+            requestedScanPending: this.store.get('scan_announcement', null) !== null,
+            discovery: discovery
+              ? {
+                  market: discovery.market,
+                  processed: discovery.offset,
+                  total: discovery.listed.length,
+                }
+              : null,
+            pendingDeliveries: this.store.pendingCount(),
+            activeIdeas: this.store.activeIdeas().length,
+            activeEntries: this.store.activeEntries(),
+            soakStarted: this.store.get('soak_start', null),
+            budget,
+            learning: new Learning(this.store).status(),
+            instruments: monitored.map((x) => ({
+              symbol: x.symbol,
+              pausedReason: this.store.get(`quality:${x.id}`, null),
+              dataTime: this.store.get(`freshness:${x.id}`, null),
+            })),
+          },
+          null,
+          2,
+        );
+        await i.editReply(
+          status.length <= 1950
+            ? status
+            : {
+                content: 'Status attached (full diagnostics).',
+                files: [{ attachment: Buffer.from(status), name: 'status.json' }],
+              },
         );
         return;
       }
@@ -478,9 +555,13 @@ export class CommandHandler {
         if (!journal.length) throw new Error('Unknown idea ID');
         await i.editReply({
           embeds: [
-            journal.at(-1)!.kind === 'watch_tracker'
-              ? trackerCard(journal.at(-1)!)
-              : card(journal.at(-1)!),
+            journal.at(-1)!.learningText
+              ? new EmbedBuilder()
+                  .setTitle('Learning review')
+                  .setDescription(journal.at(-1)!.learningText!.slice(0, 4000))
+              : journal.at(-1)!.kind === 'watch_tracker'
+                ? trackerCard(journal.at(-1)!)
+                : card(journal.at(-1)!),
           ],
           content: journal
             .map(

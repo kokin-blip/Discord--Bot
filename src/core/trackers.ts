@@ -19,6 +19,8 @@ export interface PendingReversal {
   warning: Bar;
   elapsed: number;
   announced: boolean;
+  strategyVersion?: string;
+  confirmationBars?: number;
 }
 export interface TrackerCursor {
   lastBar: number;
@@ -152,7 +154,7 @@ export function advanceReversal(
     ? 'cancelled'
     : (bull ? bar.close > next.high : bar.close < next.low)
       ? 'confirmed'
-      : next.elapsed >= 5
+      : next.elapsed >= (next.confirmationBars ?? 5)
         ? 'expired'
         : undefined;
   if (!phase) return { pending: next };
@@ -188,7 +190,7 @@ export function reversalDetails(
     frozenLow: pending.low,
     cancellationLevel: pending.direction === 'bullish' ? pending.warning.low : pending.warning.high,
     elapsed: pending.elapsed,
-    confirmationBars: 5,
+    confirmationBars: pending.confirmationBars ?? 5,
     close,
   };
 }

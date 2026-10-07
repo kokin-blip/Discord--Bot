@@ -429,3 +429,31 @@ it('rebuilds silently when an outage extends beyond available replay history', (
     store.close();
   }
 });
+it('keeps pending reversal version after promotion and journals recovery outcomes silently', async () => {
+  const { currentReversal, saveReversal } = await import('../src/reversal-config.js');
+  const store = new Store(':memory:');
+  try {
+    const { prior, warning } = reversalFixture('bullish', DAY),
+      d = dataset([...prior]);
+    trackWatchlist(store, d, prior.at(-1)!.end, true);
+    d.daily.push(warning);
+    trackWatchlist(store, d, warning.end, false);
+    const version = currentReversal(store).version;
+    saveReversal(store, { benchmarkAgreement: true, confirmationBars: 5 });
+    const confirm = bar(warning.end, 161, 100, DAY);
+    d.daily.push(confirm);
+    trackWatchlist(store, d, confirm.end, true);
+    const terminal = store
+      .journal()
+      .find((e) => e.tracker?.type === 'reversal' && e.tracker.phase === 'confirmed')!;
+    expect(terminal.strategyVersion).toBe(version);
+    expect(terminal.recovery).toBe(true);
+    expect(
+      store.pending(confirm.end).filter((p) => p.event.tracker?.type === 'reversal'),
+    ).toHaveLength(1);
+    trackWatchlist(store, d, confirm.end, false);
+    expect(store.journal().filter((e) => e.id === terminal.id)).toHaveLength(1);
+  } finally {
+    store.close();
+  }
+});
