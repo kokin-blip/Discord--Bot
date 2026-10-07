@@ -32,6 +32,7 @@ it('reports switches, freshness, pending warning state and cached volume eligibi
     store.cache(data.instrument, '1d', data.daily);
     store.cache(data.instrument, '15m', data.intraday);
     store.set(`tracker:v1:${data.instrument.id}:15m`, { lastBar: event.marketTime });
+    const pendingBeforeDebug = store.pendingCount();
     const report = debugReport(store, now, 'version', 'test');
     expect(report.alerts).toMatchObject({ enabled: true, volumeMultiplier: 2, baselineDays: 10 });
     expect(report.instruments[0]!.timeframes[1]).toMatchObject({
@@ -40,7 +41,7 @@ it('reports switches, freshness, pending warning state and cached volume eligibi
       stale: false,
       volume: { thresholdMet: true, relativeVolume: 2.5 },
     });
-    expect(store.pendingCount()).toBe(0);
+    expect(store.pendingCount()).toBe(pendingBeforeDebug);
     expect(store.activeIdeas()).toHaveLength(0);
     expect(() => debugReport(store, now, 'version', 'test', 'MISSING')).toThrow('not monitored');
     const later = debugReport(store, now + 900000, 'version', 'test');

@@ -69,3 +69,11 @@ The strategy is experimental. Reference prices, target touches, and planned rewa
 `/watch add` offers searchable symbol quick picks for common stocks, ETFs and Coinbase USD pairs. Choose the market first to filter the dropdown, then pick a symbol or type a custom one. Suggestions are examples; normal provider, strategy, data-quality and pin-limit checks still apply. Command definitions update automatically after deployment; no reinvite is needed.
 
 Use `/debug check` (optionally `symbol:BTC-USD`) for an ephemeral JSON attachment showing alert toggles, data freshness, tracker cursors, cached volume/baseline measurements, pending reversals, provider cooldowns, channel permissions and resource budgets. It does not fetch provider data or send alerts. `/debug test` is restricted to administrators/managers and sends a clearly labeled synthetic volume card with an annotated chart to `TEST_CHANNEL_ID` only. It tests publishing and rendering even during provider outages, uses normal resource limits and receipts, and leaves real ideas, tracker cursors and cooldowns untouched. If charts are unavailable, the reply explicitly reports text-only delivery. No synthetic events are queued for normal-channel publishing. Commands sync automatically after deployment.
+
+## Public bot and watchlist updates
+
+Major releases post their changelog and added/changed/removed commands once to the configured **operations** channel. `src/releases.ts` contains immutable release records; future major updates append a record, while routine fixes and redeploys do not trigger repeat announcements.
+
+Manual pins, removals, restorations, and changed automatic selections post to the **watchlist** channel. Each update shows the full current manual/automatic list, additions/removals, persistent exclusions, and symbols still monitored for active ideas. Unchanged selections and no-op commands do not announce again. Restoration makes a symbol eligible; it does not immediately pin or select it.
+
+In test mode both announcement types use `TEST_CHANNEL_ID`. Existing publication permissions, production release checks, resource limits and pause controls apply. Announcements use durable delivery receipts, never charts, and large lists attach their complete text. Signal events retain queue priority.

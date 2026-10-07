@@ -507,3 +507,25 @@ it('delivers weekly reports without charts or threads and attaches the complete 
     store.close();
   }
 });
+it('delivers release and watchlist announcements once without charts and attaches long full lists', async () => {
+  const { announcement } = await import('../src/announcements.js');
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      body = 'Full current watchlist\n' + 'AAPL · BTC-USD · '.repeat(300);
+    const event = announcement('public-announcement', 'Watchlist updated', body, Date.now());
+    store.enqueue(event, 'watchlist');
+    await h.publisher.deliver(event, 'main');
+    await h.publisher.deliver(event, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(store.thread(event.ideaId)).toBeUndefined();
+    const payload = h.main.send.mock.calls[0][0];
+    expect(payload.embeds[0].toJSON().title).toBe('Watchlist updated');
+    expect(payload.embeds[0].toJSON().description.length).toBeLessThanOrEqual(4000);
+    expect(payload.files[0].attachment.toString()).toBe(body);
+    expect(store.receipt(event.id, 'main')).toBeTruthy();
+  } finally {
+    store.close();
+  }
+});

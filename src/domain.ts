@@ -83,7 +83,14 @@ export interface SignalEvent {
     basis: 'completed_close';
     ambiguous: boolean;
   };
-  kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker' | 'learning_review' | 'learning_report';
+  kind?:
+    | 'lifecycle'
+    | 'setup_snapshot'
+    | 'watch_tracker'
+    | 'learning_review'
+    | 'learning_report'
+    | 'announcement';
+  announcement?: { title: string; body: string };
   learning?: LearningFeatures;
   learningText?: string;
   sourceEventId?: string;

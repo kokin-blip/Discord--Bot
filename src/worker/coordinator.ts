@@ -1,3 +1,4 @@
+import { queueRelease } from '../announcements.js';
 import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import {
@@ -125,12 +126,14 @@ export class SignalCoordinator {
           this.store.set('command_registration_error', diagnosticCode(error));
           throw error;
         }
+        queueRelease(this.store, Date.now(), this.env.BUILD_INFO?.id ?? 'unknown');
         const now = Date.now(),
           day = new Date(now).toISOString().slice(0, 10),
           force = this.store.get('scan_requested', false);
         this.store.set('scan_requested', false);
         // Discovery batches advance each minute. Monitoring remains on a five-minute cadence.
         const discoveryDue = this.store.get('discovery_day', '') !== day;
+        let scanFailed = false;
         if (
           discoveryDue ||
           force ||
@@ -138,8 +141,18 @@ export class SignalCoordinator {
           now - this.store.get('last_poll', 0) >= 300_000
         ) {
           stage = 'scan';
-          await this.service.scan(now, force);
-          this.store.set('last_poll', now);
+          try {
+            await this.service.scan(now, force);
+            this.store.set('last_poll', now);
+          } catch (error) {
+            // Durable deliveries, including operational announcements, do not depend on a
+            // successful provider poll. Preserve the failure for /status and release checks.
+            scanFailed = true;
+            this.store.set('last_error', diagnosticCode(error));
+            if (!this.store.get('last_error_stage', null))
+              this.store.set('last_error_stage', 'scan');
+            this.store.set('soak_start', 0);
+          }
         }
         const usage = this.store.get('cloud_usage', { reads: 0, writes: 0, requests: 0 });
         this.store.set(
@@ -189,9 +202,11 @@ export class SignalCoordinator {
             this.store.set('soak_start', 0);
           }
         }
-        this.store.set('last_error', null);
-        this.store.set('last_error_stage', null);
-        return new Response('Tick complete');
+        if (!scanFailed) {
+          this.store.set('last_error', null);
+          this.store.set('last_error_stage', null);
+        }
+        return new Response(scanFailed ? 'Tick complete; scan failed' : 'Tick complete');
       } finally {
         this.busy = false;
       }

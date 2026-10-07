@@ -100,7 +100,7 @@ export class DiscordPublisher implements Publisher {
     if (!message) {
       let dataset: Dataset | undefined;
       try {
-        if (event.kind !== 'learning_report')
+        if (event.strategyVersion !== 'system')
           dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
       } catch {}
       if (
@@ -119,8 +119,11 @@ export class DiscordPublisher implements Publisher {
             ? trackerCard(event)
             : event.strategyVersion === 'system'
               ? new EmbedBuilder()
-                  .setTitle('Bot update')
-                  .setDescription(event.reasons.join('\n'))
+                  .setTitle(event.announcement?.title ?? 'Bot update')
+                  .setTimestamp(event.marketTime)
+                  .setDescription(
+                    event.announcement?.body.slice(0, 4000) ?? event.reasons.join('\n'),
+                  )
                   .setFooter({ text: `event ${event.id}` })
               : event.strategyVersion === 'watch-alert-v1'
                 ? new EmbedBuilder()
@@ -189,15 +192,21 @@ export class DiscordPublisher implements Publisher {
         embeds: [embed],
         components: event.strategyVersion === 'system' ? [] : [buttons(event)],
         files:
-          event.kind === 'learning_report'
+          event.announcement && event.announcement.body.length > 4000
             ? [
-                new AttachmentBuilder(Buffer.from(event.learningText!), {
-                  name: 'learning-report.txt',
+                new AttachmentBuilder(Buffer.from(event.announcement.body), {
+                  name: 'announcement.txt',
                 }),
               ]
-            : image
-              ? [new AttachmentBuilder(image, { name: imageName })]
-              : [],
+            : event.kind === 'learning_report'
+              ? [
+                  new AttachmentBuilder(Buffer.from(event.learningText!), {
+                    name: 'learning-report.txt',
+                  }),
+                ]
+              : image
+                ? [new AttachmentBuilder(image, { name: imageName })]
+                : [],
         allowedMentions: { parse: [] },
         nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
         enforceNonce: true,

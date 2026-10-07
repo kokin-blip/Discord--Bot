@@ -1,3 +1,4 @@
+import { watchlistChanged } from './announcements.js';
 import type { Bar, Idea, Instrument, SignalEvent } from './domain.js';
 import { terminalStates } from './domain.js';
 import {
@@ -120,24 +121,41 @@ export class Store {
       current.filter((r) => r.pinned && !r.excluded).length >= 10
     )
       throw new Error('Manual watchlist is limited to 10 symbols');
-    this.db
-      .prepare(
-        'INSERT INTO watch VALUES(?,?,1,0,0) ON CONFLICT(id) DO UPDATE SET pinned=1,excluded=0',
-      )
-      .run(i.id, JSON.stringify(i));
+    this.transaction(() => {
+      const before = this.watchRows();
+      this.db
+        .prepare(
+          'INSERT INTO watch VALUES(?,?,1,0,0) ON CONFLICT(id) DO UPDATE SET pinned=1,excluded=0',
+        )
+        .run(i.id, JSON.stringify(i));
+      watchlistChanged(this, before, `Manual pin added: ${i.symbol}.`);
+    });
   }
   exclude(i: Instrument) {
-    this.db
-      .prepare(
-        'INSERT INTO watch VALUES(?,?,0,0,1) ON CONFLICT(id) DO UPDATE SET pinned=0,auto=0,excluded=1',
-      )
-      .run(i.id, JSON.stringify(i));
+    this.transaction(() => {
+      const before = this.watchRows();
+      this.db
+        .prepare(
+          'INSERT INTO watch VALUES(?,?,0,0,1) ON CONFLICT(id) DO UPDATE SET pinned=0,auto=0,excluded=1',
+        )
+        .run(i.id, JSON.stringify(i));
+      watchlistChanged(
+        this,
+        before,
+        `Removed and excluded from automatic selection: ${i.symbol}. Active ideas remain monitored.`,
+      );
+    });
   }
   restore(i: Instrument) {
-    this.db.prepare('UPDATE watch SET excluded=0 WHERE id=?').run(i.id);
+    this.transaction(() => {
+      const before = this.watchRows();
+      this.db.prepare('UPDATE watch SET excluded=0 WHERE id=?').run(i.id);
+      watchlistChanged(this, before, `Restored eligibility for automatic selection: ${i.symbol}.`);
+    });
   }
   selectAuto(instruments: Instrument[]) {
     this.transaction(() => {
+      const before = this.watchRows();
       this.db.exec('UPDATE watch SET auto=0');
       let count = 0;
       for (const i of instruments) {
@@ -148,6 +166,7 @@ export class Store {
           .prepare('INSERT INTO watch VALUES(?,?,0,1,0) ON CONFLICT(id) DO UPDATE SET auto=1')
           .run(i.id, JSON.stringify(i));
       }
+      watchlistChanged(this, before, 'Automatic discovery updated the selected watchlist.');
     });
   }
   monitored(): Instrument[] {
@@ -268,7 +287,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? ORDER BY CASE WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report') THEN 1 ELSE 0 END,e.seq LIMIT 25",
+          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? ORDER BY CASE WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report','announcement') THEN 1 ELSE 0 END,e.seq LIMIT 25",
         )
         .all(now) as Row[]
     ).map((r) => ({

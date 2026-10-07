@@ -490,7 +490,9 @@ it('marks discarded reversal histories unknown instead of inventing a failure', 
     expect(learning.status().pending).toBe(0);
     expect(learning.cases()).toHaveLength(0);
     expect(learning.report()).toContain('unknown 1');
-    expect(store.pending(now + DAY)).toHaveLength(0);
+    expect(store.pending(now + DAY).filter((p) => p.event.kind === 'learning_review')).toHaveLength(
+      0,
+    );
   } finally {
     store.close();
   }
