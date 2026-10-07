@@ -89,6 +89,8 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
       name: 'Entry price interpretation',
       value: `The minimum chase distance is 0.1 ATR and the maximum is 1 ATR beyond the breakout level. Confirmation must also close ${e.direction === 'bullish' ? 'above the retest high' : 'below the retest low'} and meet the configured minimum R/R. These are candle-close references, not a live quote or guaranteed fill.`,
     });
+  if (e.performance)
+    embed.addFields({ name: 'Signal performance · completed close', value: performanceText(e) });
   if (options.length)
     embed.addFields({
       name: 'Optional options context · indicative/delayed',
@@ -102,6 +104,29 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
     });
   return embed;
 }
+const signed = (n: number, suffix: string) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}${suffix}`;
+function performanceText(e: SignalEvent): string {
+  const p = e.performance!;
+  return `${signed(p.changePercent, '%')} · ${signed(p.rMultiple, 'R')}\nLatest completed close: $${price(p.referencePrice)}\nDirectional move from entry reference; not realized P/L.${p.ambiguous ? ' Intrabar ordering unknown.' : ''}`;
+}
+function reachedLevels(e: SignalEvent): string {
+  const targets = referenceGeometry(e.candidate).targets;
+  const fallback =
+    e.state === 'target_1'
+      ? [0]
+      : e.state === 'target_2'
+        ? [0, 1]
+        : e.state === 'final_target'
+          ? [0, 1, 2]
+          : [];
+  const reached = e.performance?.reachedTargets ?? fallback;
+  return targets
+    .map((target, index) => {
+      const text = `${index === 2 ? 'Final' : `${index + 1}R`}: $${price(target)}`;
+      return reached.includes(index) ? `~~${text}~~` : text;
+    })
+    .join(' · ');
+}
 export function isConfirmedExit(e: SignalEvent): boolean {
   return (
     e.candidate.entry !== undefined &&
@@ -111,6 +136,29 @@ export function isConfirmedExit(e: SignalEvent): boolean {
 
 /** Compact public entry; the full qualification record is published in its thread. */
 export function publicCard(e: SignalEvent, options: OptionsContext[] = []): EmbedBuilder {
+  if (e.candidate.entry !== undefined && ['target_1', 'target_2'].includes(e.state)) {
+    return new EmbedBuilder()
+      .setColor(0x22c6a8)
+      .setTitle(
+        `UPDATE · ${e.instrument.symbol} · ${e.direction === 'bullish' ? 'LONG' : 'SHORT'}${e.performance ? ` · ${signed(e.performance.changePercent, '%')}` : ''}`,
+      )
+      .setDescription(
+        `${e.state === 'target_1' ? '1R' : '2R'} target touched. The idea remains active.\n${(e.observations ?? []).join('\n')}`,
+      )
+      .addFields(
+        { name: 'Entry reference', value: `$${price(e.candidate.entry)}`, inline: true },
+        { name: 'Target progress', value: reachedLevels(e) },
+        ...(e.performance ? [{ name: 'Signal performance', value: performanceText(e) }] : []),
+        {
+          name: 'Data',
+          value: `Age at display: ${Math.max(0, (Date.now() - e.marketTime) / 60000).toFixed(0)}m · feed minimum: ${e.provenance.delayMinutes}m\n${new Date(e.marketTime).toISOString()}`,
+        },
+      )
+      .setTimestamp(e.marketTime)
+      .setFooter({
+        text: `Target touch, not a fill · ${e.strategyVersion} · idea ${e.ideaId} · event ${e.id}`,
+      });
+  }
   if (isConfirmedExit(e)) {
     const reason =
       e.state === 'final_target'
@@ -120,9 +168,11 @@ export function publicCard(e: SignalEvent, options: OptionsContext[] = []): Embe
           : 'The strategy holding window ended.';
     const geometry = referenceGeometry(e.candidate);
     return new EmbedBuilder()
-      .setColor(e.state === 'invalidated' ? 0xef6571 : 0x22c6a8)
+      .setColor(
+        e.state === 'invalidated' || (e.performance?.changePercent ?? 0) < 0 ? 0xef6571 : 0x22c6a8,
+      )
       .setTitle(
-        `${e.direction === 'bullish' ? 'SELL RECOMMENDED NOW 💰' : 'EXIT RECOMMENDED NOW 💰'} · ${e.instrument.symbol}`,
+        `${e.direction === 'bullish' ? 'SELL RECOMMENDED NOW 💰' : 'EXIT RECOMMENDED NOW 💰'} · ${e.instrument.symbol}${e.performance ? ` · ${signed(e.performance.changePercent, '%')}` : ''}`,
       )
       .setDescription(
         [
@@ -134,7 +184,8 @@ export function publicCard(e: SignalEvent, options: OptionsContext[] = []): Embe
       .addFields(
         { name: 'Original entry reference', value: `$${price(geometry.entry)}`, inline: true },
         { name: 'Invalidation level', value: `$${price(e.candidate.level)}`, inline: true },
-        { name: 'Final target', value: `$${price(geometry.target)}`, inline: true },
+        { name: 'Target progress', value: reachedLevels(e) },
+        ...(e.performance ? [{ name: 'Signal performance', value: performanceText(e) }] : []),
         {
           name: 'Data',
           value: `Age at display: ${Math.max(0, (Date.now() - e.provenance.asOf) / 60000).toFixed(0)}m · feed minimum: ${e.provenance.delayMinutes}m\n${new Date(e.provenance.asOf).toISOString()}`,

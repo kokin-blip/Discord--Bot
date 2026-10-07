@@ -75,6 +75,14 @@ export interface Candidate {
 }
 export interface SignalEvent {
   debug?: boolean;
+  performance?: {
+    referencePrice: number;
+    changePercent: number;
+    rMultiple: number;
+    reachedTargets: number[];
+    basis: 'completed_close';
+    ambiguous: boolean;
+  };
   kind?: 'lifecycle' | 'setup_snapshot' | 'watch_tracker';
   tracker?: TrackerDetails;
   setupContext?: { entryBand: [number, number]; remainingSessions: number; totalSessions: number };

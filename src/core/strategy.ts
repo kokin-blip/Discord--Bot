@@ -178,8 +178,22 @@ export function makeEvent(
           data.sessions,
         ),
     );
+  const mark = data.intraday.find((bar) => bar.end === marketTime && bar.end <= now);
+  const risk = candidate.entry === undefined ? 0 : Math.abs(candidate.entry - candidate.level);
+  const performance =
+    candidate.entry !== undefined && candidate.entry > 0 && risk > 0 && mark
+      ? {
+          referencePrice: mark.close,
+          changePercent: ((s * (mark.close - candidate.entry)) / candidate.entry) * 100,
+          rMultiple: (s * (mark.close - candidate.entry)) / risk,
+          reachedTargets: [...idea.milestones].sort((a, b) => a - b),
+          basis: 'completed_close' as const,
+          ambiguous: !!observations?.length,
+        }
+      : undefined;
   return {
     kind: 'lifecycle',
+    performance,
     setupContext:
       candidate.entry === undefined
         ? {
