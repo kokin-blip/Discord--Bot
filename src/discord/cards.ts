@@ -84,6 +84,11 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
         },
       );
   }
+  if (e.state === 'entry_triggered')
+    embed.addFields({
+      name: 'Entry price interpretation',
+      value: `The minimum chase distance is 0.1 ATR and the maximum is 1 ATR beyond the breakout level. Confirmation must also close ${e.direction === 'bullish' ? 'above the retest high' : 'below the retest low'} and meet the configured minimum R/R. These are candle-close references, not a live quote or guaranteed fill.`,
+    });
   if (options.length)
     embed.addFields({
       name: 'Optional options context · indicative/delayed',
@@ -97,6 +102,53 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
     });
   return embed;
 }
+/** Compact public entry; the full qualification record is published in its thread. */
+export function publicCard(e: SignalEvent, options: OptionsContext[] = []): EmbedBuilder {
+  if (e.state !== 'entry_triggered') return card(e, options);
+  const c = e.candidate,
+    geometry = referenceGeometry(c);
+  const bullish = e.direction === 'bullish';
+  const lower = bullish ? c.level + 0.1 * c.atr : c.level - c.atr;
+  const upper = bullish ? c.level + c.atr : c.level - 0.1 * c.atr;
+  const minimum = bullish ? Math.max(lower, c.retest?.high ?? lower) : lower;
+  return new EmbedBuilder()
+    .setColor(bullish ? 0x22c6a8 : 0xe9b35d)
+    .setTitle(`${bullish ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅'} · ${e.instrument.symbol}`)
+    .setDescription(
+      `Completed 15m close confirmed the ${bullish ? 'breakout' : 'breakdown'} retest. Volume, trend and reward/risk checks passed. Full reasoning in the thread.`,
+    )
+    .addFields(
+      { name: 'Entry reference', value: `$${price(geometry.entry)}`, inline: true },
+      { name: 'R/R', value: `${Number(geometry.rr.toFixed(2))}:1`, inline: true },
+      {
+        name: bullish ? 'Minimum buy-in reference' : 'Entry price band',
+        value: bullish
+          ? `$${price(minimum)} · max $${price(upper)}`
+          : `$${price(lower)}–$${price(upper)}`,
+        inline: true,
+      },
+      {
+        name: 'Invalidation',
+        value: `15m close ${bullish ? 'below' : 'above'} $${price(c.level)}`,
+        inline: true,
+      },
+      {
+        name: 'Targets',
+        value: geometry.targets
+          .map((t, i) => `${i === 2 ? 'Final' : `${i + 1}R`}: $${price(t)}`)
+          .join(' · '),
+      },
+      {
+        name: 'Data',
+        value: `Age at display: ${Math.max(0, (Date.now() - e.provenance.asOf) / 60000).toFixed(0)}m · feed minimum: ${e.provenance.delayMinutes}m\n${new Date(e.provenance.asOf).toISOString()}`,
+      },
+    )
+    .setTimestamp(e.marketTime)
+    .setFooter({
+      text: `Signal references, not fills · ${e.strategyVersion} · idea ${e.ideaId} · event ${e.id}`,
+    });
+}
+
 export function buttons(e: SignalEvent) {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()

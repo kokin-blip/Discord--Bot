@@ -10,7 +10,7 @@ import type { Dataset, OptionsContext, Publisher, SignalEvent } from '../domain.
 import type { Store } from '../sql-store.js';
 import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
-import { buttons, card, trackerCard } from './cards.js';
+import { buttons, card, publicCard, trackerCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
 import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 export class DiscordPublisher implements Publisher {
@@ -63,12 +63,12 @@ export class DiscordPublisher implements Publisher {
             m.author.id === (this.client.user?.id ?? channel.guild.members.me?.id) &&
             m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
         );
+    let options: OptionsContext[] = [];
     if (!message) {
       let dataset: Dataset | undefined;
       try {
         dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
       } catch {}
-      let options: OptionsContext[] = [];
       if (
         event.instrument.market === 'equity' &&
         event.state === 'entry_triggered' &&
@@ -94,7 +94,7 @@ export class DiscordPublisher implements Publisher {
                   )
                   .setTimestamp(event.marketTime)
                   .setFooter({ text: `event ${event.id}` })
-              : card(event, options);
+              : publicCard(event, options);
       let image: Buffer | undefined;
       if (
         dataset &&
@@ -194,7 +194,7 @@ export class DiscordPublisher implements Publisher {
     if (
       event.strategyVersion.startsWith('br-v1-') &&
       discussion?.thread &&
-      discussion.message !== message.id
+      (discussion.message !== message.id || event.state === 'entry_triggered')
     ) {
       const thread = await this.client.channels.fetch(discussion.thread);
       if (!thread?.isThread()) throw new Error('IDEA_THREAD_UNAVAILABLE');
@@ -208,7 +208,7 @@ export class DiscordPublisher implements Publisher {
               m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
           ) ??
           (await thread.send({
-            embeds: [card(event)],
+            embeds: [card(event, options)],
             components: [buttons(event)],
             allowedMentions: { parse: [] },
             nonce: BigInt(`0x${stableId(event.id, thread.id).slice(0, 16)}`).toString(),

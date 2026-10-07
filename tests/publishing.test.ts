@@ -5,7 +5,7 @@ import { DiscordPublisher } from '../src/discord/publisher.js';
 import { fixture, idea } from './fixtures.js';
 import { advance, makeEvent } from '../src/core/strategy.js';
 import { defaults } from '../src/config.js';
-import { card } from '../src/discord/cards.js';
+import { card, publicCard } from '../src/discord/cards.js';
 import type { DataService } from '../src/data.js';
 import type { SignalEvent } from '../src/domain.js';
 function harness(store: Store) {
@@ -98,7 +98,9 @@ it.each(['bullish', 'bearish'] as const)(
       expect(h.main.send).toHaveBeenCalledTimes(3);
       expect(h.thread.send).toHaveBeenCalledTimes(2);
       expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('AWAITING RETEST');
-      expect(h.main.send.mock.calls[2][0].embeds[0].toJSON().title).toContain('ENTRY CONFIRMED');
+      expect(h.main.send.mock.calls[2][0].embeds[0].toJSON().title).toContain(
+        direction === 'bullish' ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅',
+      );
       expect(h.thread.send.mock.calls.every((c: any) => c[0].files === undefined)).toBe(true);
       const root = await h.main.messages.fetch(store.thread(e.original.candidate.id)!.message);
       expect(root.startThread).toHaveBeenCalledTimes(1);
@@ -329,7 +331,7 @@ it.each(['bullish', 'bearish'] as const)(
         const embed = payload.embeds[0].toJSON();
         expect(payload.files).toHaveLength(0);
         expect(embed.image).toBeUndefined();
-        expect(embed.fields).toEqual(expect.arrayContaining(card(entry).toJSON().fields!));
+        expect(embed.fields).toEqual(expect.arrayContaining(publicCard(entry).toJSON().fields!));
         expect(embed.fields).toEqual(
           expect.arrayContaining([expect.objectContaining({ name: 'Chart' })]),
         );
@@ -342,6 +344,40 @@ it.each(['bullish', 'bearish'] as const)(
       } finally {
         store.close();
       }
+    }
+  },
+);
+
+it.each(['bullish', 'bearish'] as const)(
+  'keeps %s entry card compact and posts detailed reasoning even when entry creates the thread',
+  async (direction) => {
+    const store = new Store(':memory:');
+    try {
+      const h = harness(store),
+        e = events(direction);
+      const entry = e.advanced.events.find((event) => event.state === 'entry_triggered')!;
+      store.saveIdea(e.advanced.idea, [entry]);
+      await h.publisher.deliver(entry, 'main');
+      await h.publisher.deliver(entry, 'main');
+      const main = h.main.send.mock.calls[0][0].embeds[0].toJSON();
+      const detail = h.thread.send.mock.calls[0][0].embeds[0].toJSON();
+      expect(main.title).toContain(direction === 'bullish' ? 'BUY IN NOW ✅' : 'BEARISH ENTRY ✅');
+      expect(main.fields.some((f: any) => f.name === 'Interpretation')).toBe(false);
+      expect(main.fields.find((f: any) => f.name === 'Data').value).toContain('Age at display:');
+      expect(main.fields.find((f: any) => f.name === 'R/R').value).toBe('3:1');
+      expect(
+        main.fields.some(
+          (f: any) =>
+            f.name === (direction === 'bullish' ? 'Minimum buy-in reference' : 'Entry price band'),
+        ),
+      ).toBe(true);
+      expect(detail.description).toBe(card(entry).toJSON().description);
+      expect(detail.fields.some((f: any) => f.name === 'Interpretation')).toBe(true);
+      expect(detail.image).toBeUndefined();
+      expect(h.main.send).toHaveBeenCalledTimes(1);
+      expect(h.thread.send).toHaveBeenCalledTimes(1);
+    } finally {
+      store.close();
     }
   },
 );
