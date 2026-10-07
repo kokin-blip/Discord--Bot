@@ -125,7 +125,7 @@ export class DiscordPublisher implements Publisher {
             const rendered = await this.charts.render(
               frozen,
               event.kind === 'watch_tracker' ? undefined : event.candidate,
-              event.kind === 'watch_tracker' ? event : undefined,
+              event,
             );
             if (this.budget.image(Date.now(), rendered.length)) image = rendered;
           }

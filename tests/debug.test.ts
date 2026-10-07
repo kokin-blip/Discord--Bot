@@ -118,7 +118,7 @@ it('requires manager authorization, a private test destination and remaining res
     await h.handler.handle(h.interaction as unknown as ChatInputCommandInteraction);
     expect(h.publisher.deliver).toHaveBeenCalledTimes(1);
     expect(h.interaction.editReply).toHaveBeenCalledWith(
-      expect.stringContaining('Runtime: version. Chart style: tv-dark-v2.'),
+      expect.stringContaining('Runtime: version. Chart style: tv-simple-v3.'),
     );
     const calls = h.publisher.deliver.mock.calls as unknown as [any, string, any][];
     expect(calls[0]![1]).toBe('private-test');

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { fixture, idea } from '../tests/fixtures.js';
 import { Charts } from '../src/charts.js';
 import { defaults } from '../src/config.js';
-import { DAY, weeklyBars } from '../src/core/time.js';
+import { DAY, QUARTER, weeklyBars } from '../src/core/time.js';
 import type { Direction } from '../src/domain.js';
 import { advance } from '../src/core/strategy.js';
 import { publicCard } from '../src/discord/cards.js';
@@ -23,6 +23,25 @@ function presentationData(direction: Direction) {
     }
     bar.volume = 800 + 350 * Math.abs(Math.sin(i * 1.3));
   }
+  const confirmation = data.intraday[0]!;
+  const intraClose = (i: number) =>
+    109.5 + i * 0.006 + 0.55 * Math.sin(i * 0.19) + 0.12 * Math.sin(i * 1.5);
+  data.intraday = [
+    ...Array.from({ length: 288 }, (_, i) => {
+      const open = intraClose(i - 1),
+        close = intraClose(i);
+      return {
+        start: confirmation.start - (288 - i) * QUARTER,
+        end: confirmation.start - (287 - i) * QUARTER,
+        open,
+        close,
+        high: Math.max(open, close) + 0.08,
+        low: Math.min(open, close) - 0.08,
+        volume: 20 + 20 * Math.abs(Math.sin(i * 1.3)),
+      };
+    }),
+    confirmation,
+  ];
   if (direction === 'bearish')
     for (const bar of [...data.daily, ...data.benchmark, ...data.intraday]) {
       const old = { ...bar };
@@ -55,7 +74,7 @@ for (const direction of ['bullish', 'bearish'] as const) {
       weekly: data.weekly.filter((b) => b.end <= event.marketTime),
       provenance: event.provenance,
     };
-    const image = await charts.render(frozen, event.candidate);
+    const image = await charts.render(frozen, event.candidate, event);
     await writeFile(`output/${name}.png`, image);
     await writeFile(
       `output/${name}-card.json`,

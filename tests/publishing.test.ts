@@ -295,11 +295,11 @@ it('renders and delivers a synthetic debug snapshot without market-data access o
       'DEBUG TEST · SYNTHETIC',
     );
     expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().image.url).toBe(
-      `attachment://chart-tv-dark-v2-${event.id}.png`,
+      `attachment://chart-tv-simple-v3-${event.id}.png`,
     );
     expect(store.get('debug_last_delivery', {})).toMatchObject({
       chartAttached: true,
-      chartStyleVersion: 'tv-dark-v2',
+      chartStyleVersion: 'tv-simple-v3',
       channel: 'main',
     });
     expect(store.pendingCount()).toBe(0);
