@@ -607,3 +607,22 @@ it('delivers a daily recap once with no market data, charts, or discussion threa
     store.close();
   }
 });
+
+it('embeds the animated GIF on release announcements and preserves receipt deduplication', async () => {
+  const { queueRelease, RELEASE_GIF_URL } = await import('../src/announcements.js');
+  const store = new Store(':memory:');
+  try {
+    queueRelease(store, Date.now(), 'test-runtime');
+    const event = store.pending(Date.now())[0]!.event;
+    expect(event.announcement?.imageUrl).toBe(RELEASE_GIF_URL);
+    const h = harness(store);
+    await h.publisher.deliver(event, 'main');
+    await h.publisher.deliver(event, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().image.url).toBe(RELEASE_GIF_URL);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(h.thread.send).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});

@@ -90,7 +90,7 @@ export interface SignalEvent {
     | 'learning_review'
     | 'learning_report'
     | 'announcement';
-  announcement?: { title: string; body: string };
+  announcement?: { title: string; body: string; imageUrl?: string };
   learning?: LearningFeatures;
   learningText?: string;
   sourceEventId?: string;

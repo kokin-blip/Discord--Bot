@@ -114,5 +114,15 @@ export const releases: readonly BotRelease[] = [
     changedCommands: [],
     removedCommands: [],
   },
+  {
+    id: '2026-10-08-release-announcement-gif',
+    title: 'Animated bot update announcements',
+    changes: [
+      'Every Bot updated announcement now embeds the Monkey Developer GIF to distinguish releases from ordinary posts.',
+    ],
+    addedCommands: [],
+    changedCommands: [],
+    removedCommands: [],
+  },
 ];
 export const currentRelease = releases.at(-1)!;

@@ -145,6 +145,7 @@ export class DiscordPublisher implements Publisher {
                     .setTimestamp(event.marketTime)
                     .setFooter({ text: `event ${event.id}` })
                 : publicCard(event, options);
+      if (event.announcement?.imageUrl) embed.setImage(event.announcement.imageUrl);
       if (historical) {
         embed.setTitle(
           `${event.instrument.symbol} · HISTORICAL ${event.state.replaceAll('_', ' ')}`,

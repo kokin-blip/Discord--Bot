@@ -2,6 +2,9 @@ import type { Candidate, SignalEvent } from './domain.js';
 import type { Store } from './sql-store.js';
 import { stableId } from './core/strategy.js';
 import { currentRelease, type BotRelease } from './releases.js';
+// Direct animated asset from https://klipy.com/gifs/monkey-developer.
+export const RELEASE_GIF_URL =
+  'https://static2.klipy.com/ii/d7aec6f6f171607374b2065c836f92f4/01/5c/Jh3SMkvD.gif';
 export function announcement(id: string, title: string, body: string, now: number): SignalEvent {
   const candidate: Candidate = {
     id,
@@ -46,15 +49,14 @@ export function queueRelease(
     values.length ? values.map((v) => `• ${v}`).join('\n') : 'None.';
   const body = `**Changelog**\n${lines(release.changes)}\n\n**New commands**\n${lines(release.addedCommands)}\n\n**Changed commands**\n${lines(release.changedCommands)}\n\n**Removed commands**\n${lines(release.removedCommands)}\n\nRelease: ${release.id}\nRuntime: ${runtime}`;
   store.transaction(() => {
-    store.enqueue(
-      announcement(
-        stableId('bot-release', release.id),
-        `Bot updated · ${release.title}`,
-        body,
-        now,
-      ),
-      'operations',
+    const event = announcement(
+      stableId('bot-release', release.id),
+      `Bot updated · ${release.title}`,
+      body,
+      now,
     );
+    event.announcement!.imageUrl = RELEASE_GIF_URL;
+    store.enqueue(event, 'operations');
     store.set(key, true);
   });
 }
