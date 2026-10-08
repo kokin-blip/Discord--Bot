@@ -158,6 +158,26 @@ export const benchmarkFor = (i: Instrument): Instrument =>
 
 export type TrackerDetails =
   | {
+      type: 'range';
+      timeframe: Interval;
+      candleDirection: 'upward' | 'downward' | 'neutral';
+      range: number;
+      baseline: number;
+      relativeRange: number;
+      multiplier: number;
+      baselineDays: number;
+      bodyPercent: number;
+      closeLocationPercent: number;
+      close: number;
+      priceChange: number;
+      priceChangePercent: number;
+      volume?: number;
+      volumeBaseline?: number;
+      relativeVolume?: number;
+      combinedVolume?: boolean;
+      volumeMultiplier?: number;
+    }
+  | {
       type: 'volume';
       pressure: 'buying' | 'selling' | 'neutral';
       pressureBasis: 'candle_direction';

@@ -2,7 +2,12 @@ import type { Dataset, SignalEvent } from '../domain.js';
 import { crypto } from '../domain.js';
 import type { Store } from '../sql-store.js';
 import { DAY, QUARTER, weeklyBars } from '../core/time.js';
-import { volumeSpike, trackerHistory, type TrackerCursor } from '../core/trackers.js';
+import {
+  rangeExpansion,
+  volumeSpike,
+  trackerHistory,
+  type TrackerCursor,
+} from '../core/trackers.js';
 import { trackerEvent } from '../watch-trackers.js';
 import { stableId } from '../core/strategy.js';
 
@@ -24,6 +29,8 @@ export function debugReport(
     paused: settings.paused,
     alerts: {
       enabled: settings.alerts,
+      range: settings.rangeExpansion,
+      rangeMultiplier: settings.rangeMultiplier,
       volume: settings.volumeSpikes,
       reversals: settings.reversals,
       volumeMultiplier: settings.volumeMultiplier,
@@ -95,6 +102,20 @@ export function debugReport(
                 processedThrough: cursor?.lastBar ?? null,
                 warmedUp: cursor !== null,
                 pendingReversal: cursor?.pending ?? null,
+                range: (() => {
+                  const t = bar
+                    ? rangeExpansion(data, timeframe, bar, 0, 10, cutoff)?.details
+                    : undefined;
+                  return t?.type === 'range'
+                    ? {
+                        observed: t.range,
+                        baseline: t.baseline,
+                        relativeRange: t.relativeRange,
+                        candleDirection: t.candleDirection,
+                        thresholdMet: t.relativeRange >= settings.rangeMultiplier,
+                      }
+                    : null;
+                })(),
                 volume:
                   measurement?.type === 'volume'
                     ? {
@@ -123,7 +144,11 @@ export function debugReport(
 }
 
 /** Entirely synthetic; never call market providers or change a real idea/cursor/cooldown. */
-export function debugSample(now: number, requestId: string): { data: Dataset; event: SignalEvent } {
+export function debugSample(
+  now: number,
+  requestId: string,
+  type: 'volume' | 'range' | 'combined' = 'volume',
+): { data: Dataset; event: SignalEvent } {
   const end = Math.floor(now / QUARTER) * QUARTER;
   const dailyEnd = Math.floor(now / DAY) * DAY;
   const daily = Array.from({ length: 260 }, (_, n) => {
@@ -175,7 +200,21 @@ export function debugSample(now: number, requestId: string): { data: Dataset; ev
       asOf: end,
     },
   };
-  const observation = volumeSpike(data, '15m', intraday.at(-1)!, 2, 10)!;
+  const trigger = intraday.at(-1)!;
+  if (type !== 'volume') {
+    trigger.close = trigger.open - 1.5;
+    trigger.high = trigger.open + 0.2;
+    trigger.low = trigger.close - 0.2;
+    if (type === 'range') trigger.volume = 1000;
+  }
+  const observation =
+    type === 'volume'
+      ? volumeSpike(data, '15m', trigger, 2, 10)!
+      : rangeExpansion(data, '15m', trigger, 3)!;
+  if (type === 'combined' && observation.details.type === 'range') {
+    observation.details.combinedVolume = true;
+    observation.details.volumeMultiplier = 2;
+  }
   observation.id = stableId('debug', requestId);
   const event = trackerEvent(data, observation, now);
   event.debug = true;

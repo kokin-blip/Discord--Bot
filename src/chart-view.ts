@@ -26,7 +26,9 @@ export function chartView(data: Dataset, candidate?: Candidate, event?: SignalEv
   const label = event?.tracker
     ? event.tracker.type === 'volume'
       ? `${event.tracker.relativeVolume.toFixed(1)}× volume`
-      : `Reversal ${event.tracker.phase}`
+      : event.tracker.type === 'range'
+        ? `${event.tracker.relativeRange.toFixed(1)}× range${event.tracker.combinedVolume ? ' + volume' : ''}`
+        : `Reversal ${event.tracker.phase}`
     : snapshot
       ? 'Setup snapshot'
       : exit

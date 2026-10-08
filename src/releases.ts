@@ -30,5 +30,20 @@ export const releases: readonly BotRelease[] = [
     ],
     removedCommands: [],
   },
+  {
+    id: '2026-10-08-candle-expansion',
+    title: 'Candle range expansion alerts',
+    changes: [
+      'Daily and 15-minute alerts for candles at least 3× their preceding 10-day average range, with candle direction and volume context.',
+      'Matching range and volume spikes combine into one alert; exact measurements appear in a discussion thread.',
+      'Chart previews mark the call candle; text alerts continue when chart resources are unavailable.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/config alerts: range toggle and range_multiplier (1–10).',
+      '/debug check: range diagnostics; /debug test tracker:range or combined.',
+    ],
+    removedCommands: [],
+  },
 ];
 export const currentRelease = releases.at(-1)!;

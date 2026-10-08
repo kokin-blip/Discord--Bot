@@ -34,13 +34,12 @@ export interface TrackerObservation {
 }
 
 // Require the expected samples, rather than quietly replacing missing data with older bars.
-export function volumeSpike(
+export function baselineSamples(
   data: Dataset,
   timeframe: Interval,
   bar: Bar,
-  multiplier: number,
   days: number,
-): TrackerObservation | undefined {
+): Bar[] | undefined {
   const history = completed(timeframe === '1d' ? data.daily : data.intraday, bar.start);
   let samples: Bar[];
   if (timeframe === '1d') {
@@ -70,7 +69,25 @@ export function volumeSpike(
     const lookup = new Map(history.map((b) => [b.start, b]));
     samples = starts.flatMap((start) => (lookup.has(start) ? [lookup.get(start)!] : []));
   }
-  if (samples.length !== days) return;
+  if (samples.length !== days || new Set(samples.map((b) => b.start)).size !== days) return;
+  try {
+    validateBars([...samples].sort((a, b) => a.start - b.start));
+  } catch {
+    return;
+  }
+  return samples;
+}
+
+export function volumeSpike(
+  data: Dataset,
+  timeframe: Interval,
+  bar: Bar,
+  multiplier: number,
+  days: number,
+): TrackerObservation | undefined {
+  const samples = baselineSamples(data, timeframe, bar, days);
+  if (!samples) return;
+  const history = completed(timeframe === '1d' ? data.daily : data.intraday, bar.start);
   const baseline = mean(samples.map((b) => b.volume));
   if (!(baseline > 0) || bar.volume < multiplier * baseline) return;
   const previous = history.at(-1);
@@ -92,6 +109,63 @@ export function volumeSpike(
       priceChangePercent: (bar.close / previous.close - 1) * 100,
       baselineDays: days,
       multiplier,
+    },
+  };
+}
+
+/** Price range, including wicks; volume context is optional and never qualifies an entry. */
+export function rangeExpansion(
+  data: Dataset,
+  timeframe: Interval,
+  bar: Bar,
+  multiplier: number,
+  days = 10,
+  cutoff = data.provenance.asOf,
+): TrackerObservation | undefined {
+  if (bar.end > cutoff) return;
+  try {
+    validateBars([bar]);
+  } catch {
+    return;
+  }
+  const samples = baselineSamples(data, timeframe, bar, days);
+  if (!samples) return;
+  const measured = [bar, ...samples];
+  if (timeframe === '15m' && measured.some((b) => b.end - b.start !== QUARTER)) return;
+  if (
+    timeframe === '1d' &&
+    data.instrument.market === 'crypto' &&
+    measured.some((b) => b.start % DAY !== 0 || b.end - b.start !== DAY)
+  )
+    return;
+  const range = bar.high - bar.low;
+  const baseline = mean(samples.map((b) => b.high - b.low));
+  if (!(baseline > 0) || !(range > 0) || range < multiplier * baseline) return;
+  const previous = completed(timeframe === '1d' ? data.daily : data.intraday, bar.start).at(-1);
+  if (!previous) return;
+  const volumeBaseline = mean(samples.map((b) => b.volume));
+  return {
+    id: stableId('watch-range-v1', data.instrument.id, timeframe, bar.end),
+    direction: bar.close >= bar.open ? 'bullish' : 'bearish',
+    bar,
+    details: {
+      type: 'range',
+      timeframe,
+      range,
+      baseline,
+      relativeRange: range / baseline,
+      multiplier,
+      baselineDays: days,
+      candleDirection:
+        bar.close > bar.open ? 'upward' : bar.close < bar.open ? 'downward' : 'neutral',
+      bodyPercent: (Math.abs(bar.close - bar.open) / range) * 100,
+      closeLocationPercent: ((bar.close - bar.low) / range) * 100,
+      close: bar.close,
+      priceChange: bar.close - previous.close,
+      priceChangePercent: (bar.close / previous.close - 1) * 100,
+      ...(volumeBaseline > 0
+        ? { volume: bar.volume, volumeBaseline, relativeVolume: bar.volume / volumeBaseline }
+        : {}),
     },
   };
 }

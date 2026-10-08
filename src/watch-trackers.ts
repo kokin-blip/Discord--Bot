@@ -9,6 +9,7 @@ import {
   reversalDetails,
   trackerHistory,
   volumeSpike,
+  rangeExpansion,
   type TrackerCursor,
   type TrackerObservation,
 } from './core/trackers.js';
@@ -51,13 +52,36 @@ export function trackWatchlist(store: Store, data: Dataset, now: number, recover
           bar.end >= cutoff - (timeframe === '15m' ? 2 * QUARTER : DAY + 16 * 60_000);
         const emit = (observation: TrackerObservation) =>
           store.enqueue(trackerEvent(data, observation, now), 'watchlist');
-        if (publicBar && settings.volumeSpikes) {
-          const volume = volumeSpike(data, timeframe, bar, settings.volumeMultiplier, 10);
-          if (
-            volume?.details.type === 'volume' &&
-            store.cooldown(`${key}:volume:${volume.details.pressure}`, bar.end)
-          )
-            emit(volume);
+        if (publicBar) {
+          const volume = settings.volumeSpikes
+            ? volumeSpike(data, timeframe, bar, settings.volumeMultiplier, 10)
+            : undefined;
+          const range = settings.rangeExpansion
+            ? rangeExpansion(data, timeframe, bar, settings.rangeMultiplier, 10, cutoff)
+            : undefined;
+          const volumeKey =
+            volume?.details.type === 'volume'
+              ? `${key}:volume:${volume.details.pressure}`
+              : undefined;
+          const rangeKey =
+            range?.details.type === 'range'
+              ? `${key}:range:${range.details.candleDirection}`
+              : undefined;
+          const volumeAllowed = volumeKey ? store.cooldown(volumeKey, bar.end) : false;
+          const rangeAllowed = rangeKey ? store.cooldown(rangeKey, bar.end) : false;
+          if (range?.details.type === 'range' && volume?.details.type === 'volume') {
+            if (volumeAllowed || rangeAllowed) {
+              // A combined delivery covers both trackers, including one still cooling down.
+              store.markCooldown(volumeKey!, bar.end);
+              store.markCooldown(rangeKey!, bar.end);
+              range.details.combinedVolume = true;
+              range.details.volumeMultiplier = settings.volumeMultiplier;
+              emit(range);
+            }
+          } else {
+            if (range && rangeAllowed) emit(range);
+            if (volume && volumeAllowed) emit(volume);
+          }
         }
         // A pending warning owns this candle; no second warning on its terminal candle.
         if (cursor.pending) {
@@ -130,7 +154,9 @@ export function trackerEvent(
   const reasons = [
     details.type === 'volume'
       ? 'Unusual completed-candle volume'
-      : `Experimental reversal ${details.phase}`,
+      : details.type === 'range'
+        ? 'Unusual completed-candle range expansion'
+        : `Experimental reversal ${details.phase}`,
   ];
   // Compatibility envelope for the existing journal. No strategy geometry is evaluated or published.
   const candidate: Candidate = {

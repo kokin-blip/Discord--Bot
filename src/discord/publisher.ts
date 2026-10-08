@@ -81,9 +81,11 @@ export class DiscordPublisher implements Publisher {
       return;
     }
     const threaded =
-      !event.debug &&
+      (!event.debug || event.tracker?.type === 'range') &&
       event.kind !== 'learning_report' &&
-      (event.strategyVersion.startsWith('br-v1-') || event.tracker?.type === 'reversal');
+      (event.strategyVersion.startsWith('br-v1-') ||
+        event.tracker?.type === 'reversal' ||
+        event.tracker?.type === 'range');
     const channel = await this.validate(destination),
       existing = this.store.thread(event.ideaId);
     const target = channel,
@@ -250,7 +252,8 @@ export class DiscordPublisher implements Publisher {
       discussion?.thread &&
       (discussion.message !== message.id ||
         event.state === 'entry_triggered' ||
-        isConfirmedExit(event))
+        isConfirmedExit(event) ||
+        event.tracker?.type === 'range')
     ) {
       const thread = await this.client.channels.fetch(discussion.thread);
       if (!thread?.isThread()) throw new Error('IDEA_THREAD_UNAVAILABLE');
@@ -264,9 +267,7 @@ export class DiscordPublisher implements Publisher {
               m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
           ) ??
           (await thread.send({
-            embeds: [
-              event.tracker?.type === 'reversal' ? trackerCard(event) : card(event, options),
-            ],
+            embeds: [event.tracker ? trackerCard(event, true) : card(event, options)],
             components: [buttons(event)],
             allowedMentions: { parse: [] },
             nonce: BigInt(`0x${stableId(event.id, thread.id).slice(0, 16)}`).toString(),

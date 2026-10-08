@@ -263,10 +263,68 @@ export function buttons(e: SignalEvent) {
   );
 }
 
-export function trackerCard(e: SignalEvent): EmbedBuilder {
+export function trackerCard(e: SignalEvent, detailed = false): EmbedBuilder {
   const t = e.tracker;
   if (!t) throw new Error('MISSING_TRACKER_DETAILS');
   const timeframe = t.timeframe === '1d' ? 'Daily' : '15-minute';
+  if (t.type === 'range') {
+    const embed = new EmbedBuilder()
+      .setColor(
+        t.candleDirection === 'neutral'
+          ? 0x87939d
+          : t.candleDirection === 'upward'
+            ? 0x22c6a8
+            : 0xef6571,
+      )
+      .setTitle(
+        `${e.debug ? 'DEBUG TEST · SYNTHETIC · ' : ''}${e.instrument.symbol} · ${timeframe} · LARGE ${t.candleDirection.toUpperCase()} CANDLE${t.combinedVolume ? ' + VOLUME SPIKE' : ''}`,
+      )
+      .setDescription(
+        `${e.debug ? 'DELIVERY TEST ONLY: invented prices and volume. ' : ''}Range expansion activity; not a trade entry or liquidation signal.`,
+      )
+      .addFields(
+        { name: 'Candle range', value: `**${t.relativeRange.toFixed(2)}× normal**`, inline: true },
+        {
+          name: 'Relative volume',
+          value:
+            t.relativeVolume === undefined ? 'Unknown' : `${t.relativeVolume.toFixed(2)}× normal`,
+          inline: true,
+        },
+        { name: 'Price change', value: `${signed(t.priceChangePercent, '%')}`, inline: true },
+        { name: 'Closing price', value: price(t.close), inline: true },
+        {
+          name: 'Close within range',
+          value: `${t.closeLocationPercent.toFixed(0)}% from low to high`,
+          inline: true,
+        },
+      );
+    if (detailed)
+      embed.addFields(
+        {
+          name: 'Exact range / baseline',
+          value: `${price(t.range)} / ${price(t.baseline)} · threshold ${t.multiplier}×`,
+        },
+        {
+          name: 'Baseline',
+          value: `${t.baselineDays} prior completed ${t.timeframe === '15m' ? 'matching session slots' : 'daily candles'}; triggering candle excluded`,
+        },
+        { name: 'Body strength', value: `${t.bodyPercent.toFixed(1)}% of candle range` },
+        {
+          name: 'Volume measurements',
+          value:
+            t.volumeBaseline === undefined
+              ? 'Unknown'
+              : `${price(t.volume!)} / ${price(t.volumeBaseline)} baseline${t.combinedVolume ? ` · threshold ${t.volumeMultiplier}×` : ''}. Total volume; direction does not measure buyer/seller volume.`,
+        },
+      );
+    return embed
+      .addFields({
+        name: 'Data',
+        value: `${e.provenance.provider} / ${e.provenance.feed}\n${new Date(e.marketTime).toISOString()}\nAge at display: ${Math.max(0, (Date.now() - e.marketTime) / 60000).toFixed(0)}m · feed minimum ${e.provenance.delayMinutes}m`,
+      })
+      .setTimestamp(e.marketTime)
+      .setFooter({ text: `${e.strategyVersion} · event ${e.id}` });
+  }
   const embed = new EmbedBuilder()
     .setColor(
       t.type === 'volume'

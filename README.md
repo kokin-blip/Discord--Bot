@@ -77,3 +77,11 @@ Major releases post their changelog and added/changed/removed commands once to t
 Manual pins, removals, restorations, and changed automatic selections post to the **watchlist** channel. Each update shows the full current manual/automatic list, additions/removals, persistent exclusions, and symbols still monitored for active ideas. Unchanged selections and no-op commands do not announce again. Restoration makes a symbol eligible; it does not immediately pin or select it.
 
 In test mode both announcement types use `TEST_CHANNEL_ID`. Existing publication permissions, production release checks, resource limits and pause controls apply. Announcements use durable delivery receipts, never charts, and large lists attach their complete text. Signal events retain queue priority.
+
+### Candle range expansion
+
+Watched and active-idea symbols receive daily and 15-minute range alerts when a completed candle's high–low range is at least **3×** its preceding **10-day** average. Intraday baselines match the regular-session offset for equities and UTC slot for crypto; early-close sessions without that slot are ineligible. All 10 valid samples are required. Direction describes close versus open, not measured buyer/seller volume or liquidations. These alerts never create strategy entries or learning outcomes.
+
+Use `/config alerts enabled:true range:true range_multiplier:3` (range multiplier 1–10). Existing settings default to enabled under the master switch. Matching enabled volume and range spikes combine into one card with a four-hour cooldown for each tracker and candle direction. A discussion thread holds exact range, body and volume measurements. Charts mark the triggering candle; chart failure or allowance exhaustion leaves text delivery available. Warm-up, recovery and re-enabling never replay old alerts.
+
+`/debug check` reports cached range measurements and threshold eligibility. `/debug test tracker:range` and `/debug test tracker:combined` deliver labeled synthetic examples to `TEST_CHANNEL_ID` without changing live tracker state. Run both in the private test channel and inspect the card and marked candle before normal-channel release. Local layout previews: `node --import tsx scripts/preview-range.ts`.

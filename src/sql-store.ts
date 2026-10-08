@@ -349,6 +349,13 @@ export class Store {
       )
       .run(id, channel, message, thread ?? null);
   }
+  markCooldown(key: string, time: number): void {
+    this.db
+      .prepare(
+        'INSERT INTO cooldowns VALUES(?,?) ON CONFLICT(key) DO UPDATE SET time=excluded.time',
+      )
+      .run(key, time);
+  }
   cooldown(key: string, time: number, interval = 14_400_000): boolean {
     const r = this.db.prepare('SELECT time FROM cooldowns WHERE key=?').get(key) as Row | undefined;
     if (r && time - Number(r.time) < interval) return false;

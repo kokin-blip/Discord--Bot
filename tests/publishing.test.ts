@@ -529,3 +529,52 @@ it('delivers release and watchlist announcements once without charts and attache
     store.close();
   }
 });
+
+it.each(['range', 'combined'] as const)(
+  'retries %s thread details without reposting the successful public card or chart',
+  async (type) => {
+    const { debugSample } = await import('../src/discord/debug.js');
+    const store = new Store(':memory:');
+    try {
+      const h = harness(store),
+        { event, data } = debugSample(Date.now(), `range-${type}`, type);
+      event.debug = false;
+      store.enqueue(event, 'watchlist');
+      h.thread.send.mockRejectedValueOnce(new Error('Thread unavailable'));
+      await expect(h.publisher.deliver(event, 'main', data)).rejects.toThrow('Thread unavailable');
+      await h.publisher.deliver(event, 'main', data);
+      await h.publisher.deliver(event, 'main', data);
+      expect(h.main.send).toHaveBeenCalledTimes(1);
+      expect(h.charts.render).toHaveBeenCalledTimes(1);
+      expect(h.thread.send).toHaveBeenCalledTimes(2);
+      const root = await h.main.messages.fetch(store.thread(event.ideaId)!.message);
+      expect(root.startThread).toHaveBeenCalledTimes(1);
+      const payload = h.thread.send.mock.calls[1][0];
+      expect(
+        payload.embeds[0].toJSON().fields.some((f: any) => f.name === 'Exact range / baseline'),
+      ).toBe(true);
+      expect(payload.files).toBeUndefined();
+      expect(store.receipt(event.id, 'main')).toBeDefined();
+      expect(store.receipt(event.id, 'thread')).toBeDefined();
+    } finally {
+      store.close();
+    }
+  },
+);
+it('range text and discussion survive rendering failure', async () => {
+  const { debugSample } = await import('../src/discord/debug.js');
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      { event, data } = debugSample(Date.now(), 'range-no-chart', 'range');
+    event.debug = false;
+    store.enqueue(event, 'watchlist');
+    h.charts.render.mockRejectedValueOnce(new Error('Chart unavailable'));
+    await h.publisher.deliver(event, 'main', data);
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('LARGE DOWNWARD');
+    expect(h.main.send.mock.calls[0][0].files).toHaveLength(0);
+    expect(h.thread.send).toHaveBeenCalledTimes(1);
+  } finally {
+    store.close();
+  }
+});

@@ -41,6 +41,8 @@ export interface Settings {
   channels: Partial<Record<Route, string>>;
   alerts: boolean;
   options: boolean;
+  rangeExpansion: boolean;
+  rangeMultiplier: number;
   volumeSpikes: boolean;
   reversals: boolean;
   volumeMultiplier: number;
@@ -50,6 +52,8 @@ export const initialSettings: Settings = {
   channels: {},
   alerts: true,
   options: true,
+  rangeExpansion: true,
+  rangeMultiplier: 3,
   volumeSpikes: true,
   reversals: true,
   volumeMultiplier: 2,

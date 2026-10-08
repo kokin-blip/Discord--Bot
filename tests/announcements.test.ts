@@ -13,7 +13,7 @@ it('queues each major release once across repeated ticks and runtime changes', (
     expect(updates(store)).toHaveLength(1);
     const release = updates(store)[0]!;
     expect(store.pending(10)[0]!.route).toBe('operations');
-    expect(release.announcement?.body).toContain('/learning report');
+    expect(release.announcement?.body).toContain('/config alerts');
     expect(release.announcement?.body).toContain('Removed commands');
     expect(release.announcement?.body).toContain('Runtime: runtime-one');
     store.delivered(release.id);

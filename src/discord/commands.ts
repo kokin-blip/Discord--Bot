@@ -155,6 +155,16 @@ commands.push(
           o.setName('volume').setDescription('Daily and 15-minute volume spikes'),
         )
         .addBooleanOption((o) =>
+          o.setName('range').setDescription('Daily and 15-minute range expansion'),
+        )
+        .addNumberOption((o) =>
+          o
+            .setName('range_multiplier')
+            .setDescription('Range versus preceding 10-day average (default 3)')
+            .setMinValue(1)
+            .setMaxValue(10),
+        )
+        .addBooleanOption((o) =>
           o.setName('reversals').setDescription('Experimental reversal warnings and follow-ups'),
         )
         .addNumberOption((o) =>
@@ -179,7 +189,17 @@ commands.push(
     .addSubcommand((s) =>
       s
         .setName('test')
-        .setDescription('Send a labeled synthetic chart alert to the private test channel'),
+        .setDescription('Send a labeled synthetic chart alert to the private test channel')
+        .addStringOption((o) =>
+          o
+            .setName('tracker')
+            .setDescription('Synthetic alert type')
+            .addChoices(
+              { name: 'Volume', value: 'volume' },
+              { name: 'Range', value: 'range' },
+              { name: 'Range + volume', value: 'combined' },
+            ),
+        ),
     ),
 );
 const learning = new SlashCommandBuilder()
@@ -350,7 +370,11 @@ export class CommandHandler {
         } else {
           if (!this.testChannel)
             throw new Error('Configure TEST_CHANNEL_ID to run a private delivery test.');
-          const { data, event } = debugSample(Date.now(), i.id);
+          const { data, event } = debugSample(
+            Date.now(),
+            i.id,
+            (i.options.getString('tracker') ?? 'volume') as 'volume' | 'range' | 'combined',
+          );
           this.store.recordEvent(event);
           await this.publisher.deliver(event, this.testChannel, data);
           const result = this.store.get<{ chartAttached: boolean } | null>(
@@ -447,6 +471,15 @@ export class CommandHandler {
         } else {
           settings.alerts = i.options.getBoolean('enabled', true);
           settings.options = i.options.getBoolean('options') ?? settings.options;
+          settings.rangeExpansion = i.options.getBoolean('range') ?? settings.rangeExpansion;
+          settings.rangeMultiplier =
+            i.options.getNumber('range_multiplier') ?? settings.rangeMultiplier;
+          if (
+            !Number.isFinite(settings.rangeMultiplier) ||
+            settings.rangeMultiplier < 1 ||
+            settings.rangeMultiplier > 10
+          )
+            throw new Error('Range multiplier must be between 1 and 10');
           settings.volumeSpikes = i.options.getBoolean('volume') ?? settings.volumeSpikes;
           settings.reversals = i.options.getBoolean('reversals') ?? settings.reversals;
           settings.volumeMultiplier =

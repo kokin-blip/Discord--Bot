@@ -25,6 +25,8 @@ it('syncs global server commands once, including tracker controls, and retries a
       'enabled',
       'options',
       'volume',
+      'range',
+      'range_multiplier',
       'reversals',
       'volume_multiplier',
     ]);
