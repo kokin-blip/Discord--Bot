@@ -152,17 +152,15 @@ export async function chartSnapshot(
           }
           const markerIndex =
             primary && view.call ? bars.findIndex((b) => b.start === view.call!.start) : -1;
-          chart
-            .timeScale()
-            .setVisibleLogicalRange({
-              from:
-                bars.length < 10
-                  ? -3
-                  : markerIndex >= 0
-                    ? Math.min(Math.max(0, bars.length - 48), Math.max(0, markerIndex - 12))
-                    : Math.max(0, bars.length - 48),
-              to: bars.length + 6,
-            });
+          chart.timeScale().setVisibleLogicalRange({
+            from:
+              bars.length < 10
+                ? -3
+                : markerIndex >= 0
+                  ? Math.min(Math.max(0, bars.length - 48), Math.max(0, markerIndex - 12))
+                  : Math.max(0, bars.length - 48),
+            to: bars.length + 6,
+          });
         }
       },
       {

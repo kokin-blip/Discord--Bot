@@ -2,6 +2,7 @@ import type { SignalEvent, LearningFeatures } from './domain.js';
 import type { Store } from './sql-store.js';
 import { stableId, strategyVersion } from './core/strategy.js';
 import { currentReversal, reversalDefaults, saveReversal } from './reversal-config.js';
+import { DailyRecap } from './daily-recap.js';
 const DAY = 86_400_000;
 export type Family = 'reversal_warning' | 'strategy_setup' | 'strategy_entry';
 type Outcome = 'failure' | 'success' | 'unconfirmed' | 'ambiguous' | 'unknown';
@@ -190,6 +191,11 @@ export class Learning {
       .run(`${e.ideaId}:${family}`, JSON.stringify(p));
   }
   private resolve(p: Pending, e: SignalEvent, result: Outcome, publish: boolean) {
+    new DailyRecap(this.store).record(p.event, e, {
+      family: p.family,
+      outcome: result,
+      experiments: p.experiments,
+    });
     const context = `benchmark:${p.features.benchmarkTrend};alignment:${p.features.benchmarkTrend === 'unknown' ? 'unknown' : p.features.benchmarkAgreement ? 'aligned' : 'opposed'};volume:${p.features.breakoutRelativeVolume === undefined ? 'unknown' : p.features.breakoutRelativeVolume >= (p.features.breakoutThreshold ?? Infinity) + 0.5 ? 'strong' : 'standard'}`;
     const timeframe = p.event.tracker?.timeframe ?? (p.family === 'strategy_setup' ? '1d' : '15m');
     const key = JSON.stringify([
@@ -273,6 +279,7 @@ export class Learning {
     this.store.set('learning_resolved', this.store.get('learning_resolved', 0) + 1);
   }
   process(now: number, limit = 20) {
+    new DailyRecap(this.store).initialize(now);
     if (
       this.store.get('budget_paused', false) ||
       this.store.settings().paused ||
@@ -347,8 +354,9 @@ export class Learning {
             ),
           );
       }
-      this.propose(now);
+      this.store.transaction(() => this.propose(now));
       this.weekly(now);
+      new DailyRecap(this.store).queue(now);
     }
   }
   private propose(now: number) {
@@ -360,6 +368,7 @@ export class Learning {
       if (experiment.status === 'shadow' && experiment.version !== active) {
         experiment.status = 'superseded';
         this.putExperiment(experiment);
+        new DailyRecap(this.store).activity(experiment, 'superseded by a rule-version change', now);
       }
     }
     const groups = this.rows<Group>('learning_counts');
@@ -426,6 +435,11 @@ export class Learning {
         status: 'shadow',
         evidence: { eligible, failures, difference },
       });
+      new DailyRecap(this.store).activity(
+        this.experiments().find((e) => e.id === id)!,
+        'started shadow testing a possible improvement',
+        now,
+      );
     }
   }
   report(): string {
@@ -498,10 +512,15 @@ export class Learning {
       e.promotedVersion = version!;
       e.status = 'promoted';
       this.putExperiment(e);
+      new DailyRecap(this.store).activity(
+        e,
+        'manager-approved promotion; production validation still required',
+        now,
+      );
     });
     return e.promotedVersion!;
   }
-  rollback(id: string): string {
+  rollback(id: string, now = Date.now()): string {
     const e = this.experiments().find((x) => x.id === id);
     if (!e || e.status !== 'promoted' || !e.previousVersion)
       throw new Error('NO_PROMOTED_EXPERIMENT');
@@ -520,6 +539,11 @@ export class Learning {
       }
       e.status = 'rolled_back';
       this.putExperiment(e);
+      new DailyRecap(this.store).activity(
+        { ...e, promotedVersion: e.previousVersion },
+        'manager-approved rollback',
+        now,
+      );
     });
     return e.previousVersion;
   }

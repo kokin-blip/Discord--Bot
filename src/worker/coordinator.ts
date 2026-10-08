@@ -1,3 +1,5 @@
+import { cachedSuggestions, type AutocompleteRequest } from '../discord/autocomplete.js';
+import { productionBlockers, canPublishProduction, publicationVersion } from './publication.js';
 import { queueRelease } from '../announcements.js';
 import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
@@ -78,6 +80,20 @@ export class SignalCoordinator {
   }
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path === '/autocomplete') {
+      const message = (await request.json()) as AutocompleteRequest;
+      return Response.json(
+        cachedSuggestions(
+          message,
+          this.store.monitored().map((i) => i.symbol),
+          this.store.activeIdeas().map((i) => ({
+            id: i.candidate.id,
+            symbol: i.candidate.instrument.symbol,
+            state: i.state,
+          })),
+        ),
+      );
+    }
     if (!this.configured())
       return failureResponse(new Error('BOT_ACTIVATION_REQUIRED'), 'activation');
     if (!this.budget.tick(Date.now()) && path !== '/command')
@@ -142,8 +158,9 @@ export class SignalCoordinator {
         ) {
           stage = 'scan';
           try {
-            await this.service.scan(now, force);
-            this.store.set('last_poll', now);
+            const monitor = force || now - this.store.get('last_poll', 0) >= 300_000;
+            await this.service.scan(now, force, monitor, !monitor);
+            if (monitor) this.store.set('last_poll', now);
           } catch (error) {
             // Durable deliveries, including operational announcements, do not depend on a
             // successful provider poll. Preserve the failure for /status and release checks.
@@ -170,36 +187,88 @@ export class SignalCoordinator {
         }
         stage = 'publication';
         if (this.store.settings().paused) return new Response('Paused');
+        let newPublicationReady = true;
         if (this.env.RELEASE_MODE === 'production') {
-          const soak = this.store.get('soak_start', 0);
-          if (
-            !soak ||
-            now - soak < 7 * 86_400_000 ||
-            now - this.store.get('healthy_at', 0) > 600_000
-          )
-            throw new Error('SEVEN_DAY_SOAK_REQUIRED');
-          if (!this.store.get<boolean>('historical_replay_verified', false))
-            throw new Error('HISTORICAL_REPLAY_REQUIRED');
-          if (routes.some((r) => !this.store.settings().channels[r]))
-            throw new Error('CONFIGURE_ALL_CHANNELS');
-          for (const route of routes)
-            await this.publisher.validate(this.store.settings().channels[route]!);
+          const blockers = productionBlockers(this.store, now);
+          for (const route of routes) {
+            const destination = this.store.settings().channels[route];
+            if (!destination) {
+              blockers.push(`CONFIGURE_CHANNEL:${route}`);
+              continue;
+            }
+            try {
+              await this.publisher.validate(destination);
+            } catch {
+              blockers.push(`CHANNEL_PERMISSIONS:${route}`);
+            }
+          }
+          this.store.set('publication_blockers', blockers);
+          newPublicationReady = !blockers.length;
+          if (newPublicationReady)
+            this.store.set(`production_version:${publicationVersion(this.store)}`, {
+              approvedAt: now,
+            });
+          // Upgrade compatibility: a root in a distinct production route proves prior production publication.
+          for (const idea of this.store.activeIdeas()) {
+            const root = this.store.thread(idea.candidate.id);
+            const route =
+              idea.candidate.instrument.market === 'equity' ? 'equity_ideas' : 'crypto_ideas';
+            if (
+              root?.channel === this.store.settings().channels[route] &&
+              root?.channel !== this.env.TEST_CHANNEL_ID &&
+              root?.thread
+            )
+              this.store.set(
+                `production_idea:${idea.candidate.id}`,
+                idea.candidate.strategyVersion,
+              );
+          }
         } else {
           if (!this.env.TEST_CHANNEL_ID) throw new Error('TEST_CHANNEL_REQUIRED');
           await this.publisher.validate(this.env.TEST_CHANNEL_ID);
         }
-        for (const pending of this.store.pending(now).slice(0, 3)) {
+        for (const pending of this.store
+          .pending(now, this.env.RELEASE_MODE === 'production' && !newPublicationReady)
+          .slice(0, 3)) {
           if (!this.budget.tick(Date.now())) break;
+          if (
+            this.env.RELEASE_MODE === 'production' &&
+            !canPublishProduction(this.store, pending.event, newPublicationReady)
+          )
+            continue;
           try {
             const target =
               this.env.RELEASE_MODE === 'production'
                 ? this.store.settings().channels[pending.route]!
                 : this.env.TEST_CHANNEL_ID;
             await this.publisher.deliver(pending.event, target);
+            if (
+              this.env.RELEASE_MODE === 'production' &&
+              pending.event.strategyVersion.startsWith('br-v1-')
+            )
+              this.store.set(
+                `production_idea:${pending.event.ideaId}`,
+                pending.event.strategyVersion,
+              );
             this.store.delivered(pending.event.id);
           } catch {
+            const target =
+              this.env.RELEASE_MODE === 'production'
+                ? this.store.settings().channels[pending.route]
+                : this.env.TEST_CHANNEL_ID;
+            if (
+              this.env.RELEASE_MODE === 'production' &&
+              target &&
+              this.store.receipt(pending.event.id, target) &&
+              pending.event.strategyVersion.startsWith('br-v1-')
+            )
+              this.store.set(
+                `production_idea:${pending.event.ideaId}`,
+                pending.event.strategyVersion,
+              );
+            if (this.env.RELEASE_MODE === 'test') this.store.set('soak_start', 0);
             this.store.failed(pending.event.id, now, pending.attempts, 'DELIVERY_FAILED');
-            this.store.set('soak_start', 0);
+            this.store.set('delivery_error', { at: now, event: pending.event.id });
           }
         }
         if (!scanFailed) {

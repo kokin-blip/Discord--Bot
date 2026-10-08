@@ -2,7 +2,15 @@ import type { Candidate, Dataset, Idea, Instrument, SignalEvent } from './domain
 import { terminalStates } from './domain.js';
 import type { Store } from './sql-store.js';
 import { DataService } from './data.js';
-import { advance, detect, makeEvent, rank, stableId, pivotLevels } from './core/strategy.js';
+import {
+  advance,
+  detect,
+  findRetest,
+  makeEvent,
+  rank,
+  stableId,
+  pivotLevels,
+} from './core/strategy.js';
 import { atr } from './core/indicators.js';
 import { checkIntraday } from './core/quality.js';
 import { DAY, QUARTER, utcDate } from './core/time.js';
@@ -14,10 +22,12 @@ export class SignalService {
     readonly store: Store,
     readonly data: DataService,
   ) {}
-  async scan(now: number, force = false): Promise<void> {
+  async scan(now: number, force = false, monitor = true, discovery = true): Promise<void> {
     if (this.running || this.store.settings().paused || this.store.get('budget_paused', false))
       return;
     this.running = true;
+    this.data.beginWork?.();
+    const startedAt = Date.now();
     const previous = this.store.get('last_scan', 0),
       recovery = !previous || now - previous > 10 * 60_000,
       announcement = this.store.get<{ id: string; requestedAt: number } | null>(
@@ -35,7 +45,7 @@ export class SignalService {
       };
       const newDay = this.store.get('discovery_day', '') !== utcDate(now);
       const pool =
-        newDay || force || announcement
+        discovery && (newDay || force || announcement)
           ? await this.data.universe(now).catch((error) => {
               discoveryFailure(error);
               return [];
@@ -43,10 +53,30 @@ export class SignalService {
           : [];
       progress('daily_history');
       // Current watchlists take precedence over discovery history downloads.
-      const refreshedMonitored = this.store.monitored();
-      await this.data.refreshDaily(refreshedMonitored, now, force);
+      const refreshedMonitored = monitor
+        ? this.store
+            .monitored()
+            .sort(
+              (a, b) =>
+                Number(
+                  this.store
+                    .activeIdeas()
+                    .some(
+                      (i) => i.candidate.instrument.id === b.id && i.candidate.entry !== undefined,
+                    ),
+                ) -
+                Number(
+                  this.store
+                    .activeIdeas()
+                    .some(
+                      (i) => i.candidate.instrument.id === a.id && i.candidate.entry !== undefined,
+                    ),
+                ),
+            )
+        : [];
+      await this.refresh(refreshedMonitored, now, 'daily', force);
       progress('intraday_history');
-      await this.data.refreshIntraday(refreshedMonitored, now);
+      await this.refresh(refreshedMonitored, now, 'intraday');
       progress('daily_history');
       try {
         await this.data.refreshDaily(pool, now);
@@ -54,7 +84,9 @@ export class SignalService {
         discoveryFailure(error);
       }
       const discoveryComplete =
-        !discoveryFailed && this.store.get('discovery_progress', null) === null;
+        !discoveryFailed &&
+        this.store.get('discovery_progress', null) === null &&
+        (!discovery ? this.store.get('discovery_day', '') === utcDate(now) : true);
       if (!discoveryFailed) this.store.set('discovery_error', null);
       const config = this.store.strategy(),
         candidates: Candidate[] = [];
@@ -71,15 +103,22 @@ export class SignalService {
         this.store.selectAuto(rank(candidates).map((c) => c.instrument));
         this.store.set('discovery_day', utcDate(now));
       }
+      if (!monitor) {
+        this.store.set('last_discovery_poll', now);
+        progress(discoveryComplete ? 'discovery_complete' : 'discovery_pending');
+        return;
+      }
       const instruments = this.store.monitored();
-      await this.data.refreshDaily(
+      await this.refresh(
         instruments.filter((i) => !pool.some((p) => p.id === i.id)),
         now,
+        'daily',
       );
       progress('intraday_history');
-      await this.data.refreshIntraday(
+      await this.refresh(
         instruments.filter((i) => !refreshedMonitored.some((r) => r.id === i.id)),
         now,
+        'intraday',
       );
       progress('strategy_evaluation');
       let recovered = 0;
@@ -128,8 +167,13 @@ export class SignalService {
             const from = idea.lastBar || idea.candidate.breakout.end;
             checkIntraday(dataset, from, cutoff);
             // Newly detected retests are copied into the existing frozen candidate; levels never change.
-            const fresh = detected.find((c) => c.id === idea.candidate.id);
-            if (!idea.candidate.retest && fresh?.retest) idea.candidate.retest = fresh.retest;
+            if (!idea.candidate.retest)
+              idea.candidate.retest = findRetest(
+                dataset,
+                idea.candidate,
+                this.store.version(idea.candidate.strategyVersion),
+                cutoff,
+              );
             const result = advance(
               idea,
               dataset,
@@ -239,7 +283,35 @@ export class SignalService {
       progress('failed');
       throw error;
     } finally {
+      this.data.endWork?.();
+      this.store.set(monitor ? 'monitor_job' : 'discovery_job', {
+        startedAt,
+        durationMs: Date.now() - startedAt,
+        finishedAt: Date.now(),
+      });
       this.running = false;
+    }
+  }
+  private async refresh(
+    list: Instrument[],
+    now: number,
+    interval: 'daily' | 'intraday',
+    force = false,
+  ) {
+    for (const market of ['equity', 'crypto'] as const) {
+      const group = list.filter((i) => i.market === market);
+      if (!group.length) continue;
+      try {
+        if (interval === 'daily') await this.data.refreshDaily(group, now, force);
+        else await this.data.refreshIntraday(group, now);
+        this.store.set(`refresh_error:${market}:${interval}`, null);
+      } catch (error) {
+        this.store.set(`refresh_error:${market}:${interval}`, {
+          at: now,
+          code: diagnosticCode(error),
+        });
+        for (const i of group) this.quality(i, error);
+      }
     }
   }
   private quality(i: Instrument, e: unknown) {
@@ -287,7 +359,7 @@ export class SignalService {
       prior = data.daily.slice(0, -1),
       a = atr(prior, this.store.strategy().atrPeriod),
       previous = prior.at(-1)!;
-    const tests: [string, boolean][] = [
+    const tests: [string, boolean, number?][] = [
       ['large_daily_move', Math.abs(b.close - previous.close) >= 2 * a],
     ];
     const recent = data.intraday.filter(
@@ -305,7 +377,11 @@ export class SignalService {
           direction,
           252,
         );
-        tests.push([kind, levels.some((level) => (last.close - level) * (prev.close - level) < 0)]);
+        for (const level of levels)
+          if ((last.close - level) * (prev.close - level) < 0) {
+            tests.push([kind, true, level]);
+            break;
+          }
       }
     }
     for (const idea of this.store
@@ -321,25 +397,40 @@ export class SignalService {
         tests.push([
           `level_cross_${idea.candidate.id}`,
           (last.close - idea.candidate.level) * (prev.close - idea.candidate.level) < 0,
+          idea.candidate.level,
         ]);
     }
-    for (const [kind, trigger] of tests) {
+    for (const [kind, trigger, crossedLevel] of tests) {
       const bar = kind.startsWith('level') || kind.endsWith('_cross') ? data.intraday.at(-1)! : b;
       if (!trigger || !this.store.cooldown(`${data.instrument.id}:${kind}`, bar.end)) continue;
       const c: Candidate = {
         id: stableId(data.instrument.id, kind),
         instrument: data.instrument,
-        direction: b.close >= previous.close ? 'bullish' : 'bearish',
+        direction:
+          crossedLevel !== undefined
+            ? bar.close > crossedLevel
+              ? 'bullish'
+              : 'bearish'
+            : b.close >= previous.close
+              ? 'bullish'
+              : 'bearish',
         strategyVersion: 'watch-alert-v1',
         breakout: b,
-        level: previous.close,
+        level: crossedLevel ?? previous.close,
         baseHigh: b.high,
         baseLow: b.low,
         atr: a,
         relativeStrength: 0,
         relativeVolume: 0,
         provisionalRR: 0,
-        reasons: [kind.replaceAll('_', ' ')],
+        reasons: [
+          kind.replaceAll('_', ' '),
+          ...(crossedLevel === undefined
+            ? []
+            : [
+                `Crossed ${bar.close > crossedLevel ? 'upward' : 'downward'} through ${crossedLevel}; prior close ${data.intraday.at(-2)?.close}, confirming close ${bar.close}`,
+              ]),
+        ],
       };
       this.store.enqueue(
         {

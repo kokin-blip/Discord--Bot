@@ -47,3 +47,37 @@ export function watchSuggestions(request: AutocompleteRequest): { name: string; 
     choices.push({ name: `${query} · Use custom symbol`, value: query });
   return choices.slice(0, 25);
 }
+
+export function cachedSuggestions(
+  request: AutocompleteRequest,
+  symbols: string[],
+  ideas: { id: string; symbol: string; state: string }[],
+): { name: string; value: string }[] {
+  const findFocused = (rows: AutocompleteOption[]): AutocompleteOption | undefined => {
+    for (const row of rows) {
+      if (row.focused) return row;
+      const found = findFocused(row.options ?? []);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  const focused = findFocused(request.data?.options ?? []);
+  const query = String(focused?.value ?? '')
+    .trim()
+    .toUpperCase();
+  if (request.data?.name === 'idea' && focused?.name === 'id')
+    return ideas
+      .filter((i) => i.id.toUpperCase().startsWith(query) || i.symbol.startsWith(query))
+      .slice(0, 25)
+      .map((i) => ({ name: `${i.symbol} · ${i.state} · ${i.id}`.slice(0, 100), value: i.id }));
+  if (
+    !['chart', 'explain', 'context', 'follow'].includes(request.data?.name ?? '') ||
+    focused?.name !== 'symbol'
+  )
+    return [];
+  return [...new Set(symbols)]
+    .filter((s) => s.includes(query))
+    .sort()
+    .slice(0, 25)
+    .map((s) => ({ name: s, value: s }));
+}

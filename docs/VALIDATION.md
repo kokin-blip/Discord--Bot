@@ -10,7 +10,9 @@
 npm run replay -- /absolute/path/to/historical-datasets.json
 ```
 
-Input is an array of `Dataset` objects from `src/domain.ts`: canonical instrument; chronological daily/weekly/15-minute bars (millisecond `start`/`end`, OHLCV); aligned benchmark daily bars; exchange sessions; and truthful data provenance. Crypto needs UTC days/Monday weeks; equities need the actual exchange calendar and adjusted histories. Preserve raw source, venue, retrieval timestamps, and the strategy version alongside the data. Reject gaps before using the report as evidence.
+Legacy correctness input is an array of `Dataset` objects from `src/domain.ts`: canonical instrument; chronological daily/weekly/15-minute bars (millisecond `start`/`end`, OHLCV); aligned benchmark daily bars; exchange sessions; and truthful data provenance. Crypto needs UTC days/Monday weeks; equities need the actual exchange calendar and adjusted histories. Preserve raw source, venue, retrieval timestamps, and the strategy version alongside the data. Reject gaps before using the report as evidence.
+
+For historical evidence, supply the explicit per-dataset source manifest and exact strategy configuration described in [Releases 1–3](RELEASES-1-3.md). A provider-name string alone no longer enables historical classification. The script validates source manifests and canonical histories; source authenticity remains an administrator review.
 
 The script advances through successive completed-candle timestamps, never providing future daily/weekly bars to the evaluator. It writes `output/replay-report.json` and prints its SHA-256. Without an input file, it runs 30 synthetic fixtures and explicitly refuses to call them historical evidence. A provider label alone does not establish authentic history; the administrator must review source data.
 
@@ -45,3 +47,5 @@ Use `/debug check` to inspect why monitoring is quiet, then `/debug test` to exe
 ## Controlled learning validation
 
 See [learning records, shadow filters and release checks](LEARNING.md). Run `npx tsx scripts/preview-learning.ts` for local synthetic review/report previews. Before normal-channel publication, inspect these messages in the private test channel and retain the existing historical-review and seven-day soak requirements. Local tests cover outcome separation, feature timing, retention, bounded recovery, reports, counterfactual blocked successes, promotion/rollback and thread-only review retries.
+
+`npm run simulate -- /absolute/path/research-input.json` is a separate offline execution model. Review its explicit costs, physical-stop assumptions, next-bar timing, unknown outcomes and chronological holdout. Its report is not a substitute for rule-fidelity review or production soak.

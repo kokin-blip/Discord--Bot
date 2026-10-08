@@ -1,3 +1,4 @@
+import { ChartCache } from '../chart-cache.js';
 import puppeteer from '@cloudflare/puppeteer';
 import type { Candidate, Dataset, SignalEvent } from '../domain.js';
 import type { Env } from './types.js';
@@ -5,12 +6,22 @@ import type { CloudBudget } from './budget.js';
 import { chartSnapshot } from '../chart-snapshot.js';
 import library from './chart-library.txt';
 export class CloudCharts {
+  private cache = new ChartCache();
   constructor(
     readonly env: Env,
     readonly budget: CloudBudget,
   ) {}
   async render(data: Dataset, candidate?: Candidate, tracker?: SignalEvent): Promise<Buffer> {
-    if (!this.budget.reserveBrowser(Date.now()))
+    return this.cache.render(data, candidate, tracker, () =>
+      this.renderFresh(data, candidate, tracker),
+    );
+  }
+  private async renderFresh(
+    data: Dataset,
+    candidate?: Candidate,
+    tracker?: SignalEvent,
+  ): Promise<Buffer> {
+    if (!this.budget.reserveBrowser(Date.now(), tracker?.state === 'entry_triggered'))
       throw new Error('BROWSER_FREE_ALLOWANCE_UNAVAILABLE');
     let active: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
     let expired = false;

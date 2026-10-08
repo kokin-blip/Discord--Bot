@@ -29,16 +29,23 @@ export default {
       return new Response('Malformed JSON', { status: 400 });
     }
     if (message.type === 1) return Response.json({ type: 1 });
-    if (message.type === 4)
-      return Response.json({
-        type: 8,
-        data: {
-          choices:
-            message.guild_id === env.DISCORD_GUILD_ID
-              ? watchSuggestions(message as AutocompleteRequest)
-              : [],
-        },
-      });
+    if (message.type === 4) {
+      let choices: { name: string; value: string }[] = [];
+      if (message.guild_id === env.DISCORD_GUILD_ID) {
+        choices = watchSuggestions(message as AutocompleteRequest);
+        if ((message as AutocompleteRequest).data?.name !== 'watch') {
+          try {
+            const stub = env.SIGNALS.get(env.SIGNALS.idFromName(env.DISCORD_GUILD_ID));
+            const response = await stub.fetch('https://internal/autocomplete', {
+              method: 'POST',
+              body,
+            });
+            if (response.ok) choices = (await response.json()) as typeof choices;
+          } catch {}
+        }
+      }
+      return Response.json({ type: 8, data: { choices } });
+    }
     if (message.type !== 2 || message.guild_id !== env.DISCORD_GUILD_ID)
       return Response.json({
         type: 4,

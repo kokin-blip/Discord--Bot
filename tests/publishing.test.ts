@@ -64,6 +64,7 @@ function harness(store: Store) {
     charts,
     { image: () => true },
     'guild',
+    () => fixture().provenance.asOf,
   );
   return { main, updates, thread, charts, publisher };
 }
@@ -97,7 +98,9 @@ it.each(['bullish', 'bearish'] as const)(
         await h.publisher.deliver(event, 'main');
       expect(h.main.send).toHaveBeenCalledTimes(3);
       expect(h.thread.send).toHaveBeenCalledTimes(2);
-      expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('AWAITING RETEST');
+      expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain(
+        'HISTORICAL watching',
+      );
       expect(h.main.send.mock.calls[2][0].embeds[0].toJSON().title).toContain(
         direction === 'bullish' ? 'BUY IN NOW ✅' : 'BUY IN NOW ❎ · SHORT',
       );
@@ -574,6 +577,32 @@ it('range text and discussion survive rendering failure', async () => {
     expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('LARGE DOWNWARD');
     expect(h.main.send.mock.calls[0][0].files).toHaveLength(0);
     expect(h.thread.send).toHaveBeenCalledTimes(1);
+  } finally {
+    store.close();
+  }
+});
+
+it('delivers a daily recap once with no market data, charts, or discussion thread', async () => {
+  const { DailyRecap } = await import('../src/daily-recap.js');
+  const store = new Store(':memory:');
+  try {
+    const start = Date.parse('2026-10-08T00:00:00-07:00');
+    const daily = new DailyRecap(store);
+    daily.initialize(start);
+    daily.queue(start + 86_400_000);
+    const event = store
+      .journal()
+      .find((e) => e.announcement?.title.startsWith('Daily callout recap'))!;
+    const h = harness(store);
+    const dataset = vi.spyOn(h.publisher.data, 'dataset');
+    await h.publisher.deliver(event, 'main');
+    await h.publisher.deliver(event, 'main');
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(dataset).not.toHaveBeenCalled();
+    expect(h.thread.send).not.toHaveBeenCalled();
+    expect(h.main.send.mock.calls[0][0].components).toEqual([]);
+    expect(store.receipt(event.id, 'main')).toBeDefined();
   } finally {
     store.close();
   }

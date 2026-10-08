@@ -18,6 +18,12 @@ const stablecoins = new Set([
 ]);
 export class Coinbase implements MarketDataProvider {
   constructor(private http: HttpClient) {}
+  beginWork() {
+    this.http.beginWork();
+  }
+  endWork() {
+    this.http.endWork();
+  }
   async discover(): Promise<Instrument[]> {
     const rows = await this.http.json<
       {

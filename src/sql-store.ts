@@ -31,7 +31,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS watch(id TEXT PRIMARY KEY,instrument TEXT NOT NULL,pinned INTEGER NOT NULL DEFAULT 0,auto INTEGER NOT NULL DEFAULT 0,excluded INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS candles(instrument TEXT NOT NULL,interval TEXT NOT NULL,start INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(instrument,interval,start));
       CREATE TABLE IF NOT EXISTS ideas(id TEXT PRIMARY KEY,body TEXT NOT NULL,state TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS ideas_state ON ideas(state);
       CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,idea_id TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS events_idea ON events(idea_id,seq);
       CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'Event journal is append-only'); END;
       CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT,'Event journal is append-only'); END;
       CREATE TABLE IF NOT EXISTS outbox(event_id TEXT PRIMARY KEY REFERENCES events(id),route TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT);
@@ -44,6 +46,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS learning_cases(id TEXT PRIMARY KEY,resolved INTEGER NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learning_counts(key TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learning_experiments(id TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS daily_outcomes(id TEXT PRIMARY KEY,callout_id TEXT NOT NULL,day TEXT NOT NULL,body TEXT NOT NULL,reported_day TEXT);
+      CREATE INDEX IF NOT EXISTS daily_outcomes_unreported ON daily_outcomes(reported_day,day);
+      CREATE TABLE IF NOT EXISTS learning_activity(id TEXT PRIMARY KEY,day TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS learning_activity_day ON learning_activity(day);
       CREATE TABLE IF NOT EXISTS strategy_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
       ${this.db.mode === 'cloud' ? '' : 'PRAGMA user_version=1;'} `);
     this.saveStrategy(this.strategy());
@@ -233,7 +239,13 @@ export class Store {
     return r ? JSON.parse(String(r.body)) : undefined;
   }
   activeIdeas(): Idea[] {
-    return (this.db.prepare('SELECT body,state FROM ideas').all() as Row[])
+    return (
+      this.db
+        .prepare(
+          "SELECT body,state FROM ideas WHERE state IN ('watching','setup_ready','entry_triggered','target_1','target_2')",
+        )
+        .all() as Row[]
+    )
       .filter((r) => !terminalStates.has(String(r.state) as Idea['state']))
       .map((r) => JSON.parse(String(r.body)));
   }
@@ -283,18 +295,49 @@ export class Store {
       this.db.prepare('INSERT OR IGNORE INTO outbox(event_id,route) VALUES(?,?)').run(e.id, route);
     });
   }
-  pending(now: number): { event: SignalEvent; route: Route; attempts: number }[] {
+  pending(
+    now: number,
+    continuingOnly = false,
+  ): { event: SignalEvent; route: Route; attempts: number }[] {
     return (
       this.db
         .prepare(
-          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? ORDER BY CASE WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report','announcement') THEN 1 ELSE 0 END,e.seq LIMIT 25",
+          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? AND (?=0 OR EXISTS (SELECT 1 FROM meta m WHERE m.key='production_idea:' || e.idea_id AND json_extract(m.value,'$')=json_extract(e.body,'$.strategyVersion'))) ORDER BY CASE WHEN json_extract(e.body,'$.strategyVersion') LIKE 'br-v1-%' THEN 0 WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report','announcement') THEN 2 ELSE 1 END,e.seq LIMIT 25",
         )
-        .all(now) as Row[]
+        .all(now, continuingOnly ? 1 : 0) as Row[]
     ).map((r) => ({
       event: JSON.parse(String(r.body)),
       route: String(r.route) as Route,
       attempts: Number(r.attempts),
     }));
+  }
+  queueStatus(now: number) {
+    const rows = this.db
+      .prepare(
+        "SELECT o.event_id,o.attempts,o.next_attempt,o.last_error,e.body FROM outbox o JOIN events e ON e.id=o.event_id WHERE o.status IN ('pending','dead') ORDER BY e.seq LIMIT 100",
+      )
+      .all() as Row[];
+    return rows.map((r) => {
+      const event: SignalEvent = JSON.parse(String(r.body));
+      return {
+        id: String(r.event_id),
+        symbol: event.instrument.symbol,
+        state: event.state,
+        ageMinutes: Math.max(0, (now - event.recordedAt) / 60000),
+        attempts: Number(r.attempts),
+        nextAttempt: Number(r.next_attempt),
+        error: r.last_error,
+        reviewRequired: Number(r.attempts) >= 10,
+      };
+    });
+  }
+  retryDelivery(id: string) {
+    const changed = this.db
+      .prepare(
+        "UPDATE outbox SET status='pending',attempts=0,next_attempt=0,last_error=NULL WHERE event_id=? AND status IN ('pending','dead')",
+      )
+      .run(id).changes;
+    if (!changed) throw new Error('Unknown pending/dead delivery');
   }
   pendingCount() {
     return Number(
@@ -326,10 +369,13 @@ export class Store {
     this.db
       .prepare("UPDATE outbox SET status='delivered',last_error=NULL WHERE event_id=?")
       .run(id);
+    this.set('last_delivery', { id, at: Date.now() });
   }
   failed(id: string, now: number, attempts: number, code: string) {
     this.db
-      .prepare('UPDATE outbox SET attempts=attempts+1,next_attempt=?,last_error=? WHERE event_id=?')
+      .prepare(
+        "UPDATE outbox SET status=CASE WHEN attempts>=9 THEN 'dead' ELSE 'pending' END,attempts=attempts+1,next_attempt=?,last_error=? WHERE event_id=?",
+      )
       .run(now + Math.min(3_600_000, 30_000 * 2 ** Math.min(attempts, 7)), code, id);
   }
   thread(id: string): { channel: string; message: string; thread?: string } | undefined {

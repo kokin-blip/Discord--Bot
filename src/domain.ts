@@ -118,6 +118,10 @@ export interface Idea {
   createdAt: number;
 }
 export interface OptionsContext {
+  bid?: number;
+  ask?: number;
+  spreadPercent?: number;
+  strike?: number;
   contract: string;
   expiry: string;
   iv?: number;
@@ -128,6 +132,8 @@ export interface OptionsContext {
   asOf?: number;
 }
 export interface MarketDataProvider {
+  beginWork?(): void;
+  endWork?(): void;
   discover(now: number): Promise<Instrument[]>;
   bars(
     instruments: Instrument[],
@@ -136,7 +142,10 @@ export interface MarketDataProvider {
     now: number,
   ): Promise<Map<string, Bar[]>>;
   calendar(start: number, end: number): Promise<Session[]>;
-  options?(instrument: Instrument): Promise<OptionsContext[]>;
+  options?(
+    instrument: Instrument,
+    context?: { direction: Direction; price: number; now: number },
+  ): Promise<OptionsContext[]>;
 }
 export interface Publisher {
   deliver(event: SignalEvent, destination: string): Promise<void>;

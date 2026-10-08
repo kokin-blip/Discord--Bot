@@ -1,3 +1,4 @@
+import { deliveryContext } from './delivery-context.js';
 import {
   AttachmentBuilder,
   ChannelType,
@@ -23,6 +24,7 @@ export class DiscordPublisher implements Publisher {
     },
     readonly budget: { image(now: number, bytes: number): boolean },
     readonly guildId: string,
+    readonly clock: () => number = Date.now,
   ) {}
   async validate(destination: string): Promise<GuildTextBasedChannel> {
     const channel = await this.client.channels.fetch(destination);
@@ -98,6 +100,7 @@ export class DiscordPublisher implements Publisher {
             m.author.id === (this.client.user?.id ?? channel.guild.members.me?.id) &&
             m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
         );
+    const historical = deliveryContext(this.store, event, this.clock());
     let options: OptionsContext[] = [];
     if (!message) {
       let dataset: Dataset | undefined;
@@ -108,10 +111,16 @@ export class DiscordPublisher implements Publisher {
       if (
         event.instrument.market === 'equity' &&
         event.state === 'entry_triggered' &&
+        !historical &&
         this.store.settings().options
       ) {
         try {
-          options = (await this.data.equities.options?.(event.instrument)) ?? [];
+          options =
+            (await this.data.equities.options?.(event.instrument, {
+              direction: event.direction,
+              price: event.candidate.entry!,
+              now: this.clock(),
+            })) ?? [];
         } catch {}
       }
       const embed =
@@ -136,9 +145,16 @@ export class DiscordPublisher implements Publisher {
                     .setTimestamp(event.marketTime)
                     .setFooter({ text: `event ${event.id}` })
                 : publicCard(event, options);
+      if (historical) {
+        embed.setTitle(
+          `${event.instrument.symbol} · HISTORICAL ${event.state.replaceAll('_', ' ')}`,
+        );
+        embed.addFields({ name: 'Delivery context', value: historical });
+      }
       let image: Buffer | undefined;
       if (
         dataset &&
+        !(historical && event.state === 'entry_triggered') &&
         event.strategyVersion !== 'system' &&
         event.strategyVersion !== 'watch-alert-v1'
       )
@@ -260,6 +276,11 @@ export class DiscordPublisher implements Publisher {
       if (thread.archived) await thread.setArchived(false);
       if (!this.store.receipt(event.id, thread.id)) {
         const recent = await thread.messages.fetch({ limit: 100 });
+        const mirroredEmbed = event.tracker ? trackerCard(event, true) : card(event, options);
+        if (historical)
+          mirroredEmbed
+            .setTitle(`${event.instrument.symbol} · HISTORICAL ${event.state.replaceAll('_', ' ')}`)
+            .addFields({ name: 'Delivery context', value: historical });
         const mirrored =
           recent.find(
             (m) =>
@@ -267,7 +288,7 @@ export class DiscordPublisher implements Publisher {
               m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
           ) ??
           (await thread.send({
-            embeds: [event.tracker ? trackerCard(event, true) : card(event, options)],
+            embeds: [mirroredEmbed],
             components: [buttons(event)],
             allowedMentions: { parse: [] },
             nonce: BigInt(`0x${stableId(event.id, thread.id).slice(0, 16)}`).toString(),

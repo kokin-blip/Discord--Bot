@@ -40,7 +40,7 @@ export class CloudBudget {
     this.store.set('budget_paused', paused);
     return !paused;
   }
-  reserveBrowser(now: number): boolean {
+  reserveBrowser(now: number, entry = false): boolean {
     const u = this.store.get('cloud_usage', {
       day: '',
       reads: 0,
@@ -52,7 +52,7 @@ export class CloudBudget {
     });
     if (
       this.store.get('budget_paused', false) ||
-      u.browserSeconds + 60 > 480 ||
+      u.browserSeconds + 60 > (entry ? 480 : 360) ||
       now - u.lastBrowser < 20_000 ||
       u.images >= 60
     )

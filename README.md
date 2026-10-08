@@ -38,7 +38,7 @@ All members can inspect; administrators or the configured manager role change sh
 
 ## Controlled learning
 
-Failure reviews explain observed failures in each callout’s thread. Detailed learning examples retain failures and exceptional successful entries; ordinary outcomes contribute aggregate counts. Weekly reports describe associations, and silent experiments test stricter filters without changing public signals. Use `/learning report`, `/learning cases`, `/learning experiments`, and manager/admin-only `/learning promote` or `/learning rollback`. Promotion remains human-controlled and versioned. See [learning rules and validation](docs/LEARNING.md).
+Failure reviews explain observed failures in each callout’s thread. Detailed learning examples retain failures and exceptional successful entries; ordinary outcomes contribute aggregate counts. Weekly reports describe associations, and silent experiments test stricter filters without changing public signals. Use `/learning report`, `/learning cases`, `/learning experiments`, and manager/admin-only `/learning promote` or `/learning rollback`. Daily text-only recaps post to the summaries channel after midnight America/Phoenix, separating confirmed-entry results, setup qualifications, and reversal outcomes. They include unresolved/uncertain counts, delayed outcomes, shadow-filter tradeoffs, and dated approved learning changes. Promotion remains human-controlled and versioned. See [learning rules and validation](docs/LEARNING.md).
 
 ## Behavior
 
@@ -58,7 +58,7 @@ The journal and delivery outbox commit together. Restart replay journals old ent
 
 ## Resource limits and current release status
 
-The implementation stops scans/publication at conservative SQLite row/request limits and falls back to text when chart rendering is unavailable. Charts are capped at 250 KiB and 60 image deliveries/day; the stricter browser reservation currently permits **at most eight render attempts/day**, shared with `/chart`, using eight of Cloudflare's ten free browser minutes. A failed attempt consumes its reservation. Confirm actual account-wide usage and browser closure during preflight; these counters cover this bot, not other Cloudflare workloads.
+The implementation stops scans/publication at conservative SQLite row/request limits and falls back to text when chart rendering is unavailable. Charts are capped at 250 KiB and 60 image deliveries/day; the stricter browser reservation currently permits **at most eight render attempts/day** (six general attempts and two reserved for entries), shared with `/chart`, using eight of Cloudflare's ten free browser minutes. A failed attempt consumes its reservation. Confirm actual account-wide usage and browser closure during preflight; these counters cover this bot, not other Cloudflare workloads.
 
 Local type checks, fixtures, chart rendering, Worker bundling, and local scheduled SQLite initialization have been exercised. Cloudflare deployment, authenticated provider access, a representative cloud workload, real historical review, and the seven-day private-channel soak remain release checkpoints requiring account/server configuration. Routine publication is gated accordingly.
 
@@ -85,3 +85,11 @@ Watched and active-idea symbols receive daily and 15-minute range alerts when a 
 Use `/config alerts enabled:true range:true range_multiplier:3` (range multiplier 1–10). Existing settings default to enabled under the master switch. Matching enabled volume and range spikes combine into one card with a four-hour cooldown for each tracker and candle direction. A discussion thread holds exact range, body and volume measurements. Charts mark the triggering candle; chart failure or allowance exhaustion leaves text delivery available. Warm-up, recovery and re-enabling never replay old alerts.
 
 `/debug check` reports cached range measurements and threshold eligibility. `/debug test tracker:range` and `/debug test tracker:combined` deliver labeled synthetic examples to `TEST_CHANNEL_ID` without changing live tracker state. Run both in the private test channel and inspect the card and marked candle before normal-channel release. Local layout previews: `node --import tsx scripts/preview-range.ts`.
+
+## Releases 1–3
+
+The three-stage [implementation plan](docs/IMPROVEMENT-PLAN.md) and [command/rollout guide](docs/RELEASES-1-3.md) cover correctness, efficiency and decision support. Use `/health`, `/explain`, `/ideas active`, `/digest`, `/stats`, `/context` and `/config show` for readable summaries with detailed attachments. Personal `/follow` preferences filter `/digest personal:true`; they do not modify shared monitoring or send unsolicited DMs. Managers inspect and retry failed deliveries through `/queue`.
+
+Discovery advances separately between monitor polls. Provider jobs launch at most 24 requests over a 25-second work window, retain per-product progress and download intraday history only when a completed slot is due. Identical frozen charts use a bounded process-local cache. Existing published production calls retain lifecycle continuity while new versions await validation; pause, quota and destination permissions still apply. Delayed/obsolete entries are labeled historical.
+
+Replay records exact strategy configuration and normalized input hashes; historical evidence requires a source manifest and administrator review. `npm run simulate -- /absolute/path/input.json` adds a separate offline next-bar execution model with costs, conservative stop/target ambiguity and chronological holdout reporting. It does not place orders or establish profitability.

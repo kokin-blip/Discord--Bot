@@ -12,8 +12,11 @@ it('reserves browser time, limits launches, and enforces image size', () => {
     expect(b.tick(now)).toBe(true);
     expect(b.reserveBrowser(now)).toBe(true);
     expect(b.reserveBrowser(now + 1000)).toBe(false);
-    for (let n = 1; n < 8; n++) expect(b.reserveBrowser(now + n * 30_000)).toBe(true);
-    expect(b.reserveBrowser(now + 9 * 30_000)).toBe(false);
+    for (let n = 1; n < 6; n++) expect(b.reserveBrowser(now + n * 30_000)).toBe(true);
+    expect(b.reserveBrowser(now + 6 * 30_000)).toBe(false);
+    expect(b.reserveBrowser(now + 6 * 30_000, true)).toBe(true);
+    expect(b.reserveBrowser(now + 7 * 30_000, true)).toBe(true);
+    expect(b.reserveBrowser(now + 9 * 30_000, true)).toBe(false);
     expect(b.image(now, 250 * 1024 + 1)).toBe(false);
     for (let n = 0; n < 60; n++) expect(b.image(now, 100)).toBe(true);
     expect(b.image(now, 100)).toBe(false);

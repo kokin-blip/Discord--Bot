@@ -98,7 +98,7 @@ export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuild
       value: options
         .map(
           (o) =>
-            `${o.contract} (${o.expiry})${o.iv === undefined ? '' : ` · IV ${(o.iv * 100).toFixed(1)}%`}${o.delta === undefined ? '' : ` · Δ ${o.delta.toFixed(2)}`}${o.asOf ? ` · ${new Date(o.asOf).toISOString()}` : ''}`,
+            `${o.contract} (${o.expiry})${o.iv === undefined ? '' : ` · IV ${(o.iv * 100).toFixed(1)}%`}${o.delta === undefined ? '' : ` · Δ ${o.delta.toFixed(2)}`}${o.spreadPercent === undefined ? '' : ` · indicative spread ${o.spreadPercent.toFixed(1)}%`}${o.asOf ? ` · ${new Date(o.asOf).toISOString()}` : ''}`,
         )
         .join('\n')
         .slice(0, 1000),

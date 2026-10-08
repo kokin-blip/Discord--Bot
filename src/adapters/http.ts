@@ -1,5 +1,12 @@
 import type { Store } from '../sql-store.js';
 export class HttpClient {
+  private work?: { startedAt: number; requests: number };
+  beginWork() {
+    this.work = { startedAt: Date.now(), requests: 0 };
+  }
+  endWork() {
+    this.work = undefined;
+  }
   private last = new Map<string, number>();
   constructor(
     private store?: Store,
@@ -10,6 +17,8 @@ export class HttpClient {
     const host = new URL(url).hostname,
       minGap = host.includes('coinbase') ? 1000 : 350;
     for (let attempt = 0; attempt < 5; attempt++) {
+      if (this.work && (this.work.requests >= 24 || Date.now() - this.work.startedAt >= 25_000))
+        throw new Error('PROVIDER_WORK_LIMIT');
       if (this.store?.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
       const blocked = this.store?.get(`retry_after:${host}`, 0) ?? 0;
       if (blocked > Date.now()) throw new Error('PROVIDER_RETRY_LATER');
@@ -18,8 +27,22 @@ export class HttpClient {
         (Date.now() -
           Math.max(this.last.get(host) ?? 0, this.store?.get(`request_at:${host}`, 0) ?? 0));
       if (wait > 0) await this.sleep(wait);
+      if (this.work && Date.now() - this.work.startedAt >= 25_000)
+        throw new Error('PROVIDER_WORK_LIMIT');
       this.last.set(host, Date.now());
       this.store?.set(`request_at:${host}`, Date.now());
+      if (this.work) this.work.requests++;
+      if (this.store) {
+        const day = new Date().toISOString().slice(0, 10);
+        const usage = this.store.get('provider_usage', { day, requests: 0 });
+        if (usage.day !== day) {
+          usage.day = day;
+          usage.requests = 0;
+        }
+        usage.requests++;
+        this.store.set('provider_usage', usage);
+        this.store.set('provider_work', this.work ?? null);
+      }
       let response: Response;
       try {
         response = await this.fetcher(url, { headers, signal: AbortSignal.timeout(20_000) });

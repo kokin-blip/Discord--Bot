@@ -1,3 +1,15 @@
+import { reportSummary } from './report-summary.js';
+import {
+  explain,
+  health,
+  activeIdeas,
+  digest,
+  statistics,
+  marketContext,
+  preferences,
+  follow,
+} from '../insights.js';
+import { publicationVersion } from '../worker/publication.js';
 import { Learning } from '../learning.js';
 import {
   ChannelType,
@@ -20,7 +32,10 @@ const watch = new SlashCommandBuilder()
   .setName('watch')
   .setDescription('Manage the shared watchlist')
   .addSubcommand((s) =>
-    s.setName('list').setDescription('Show auto selections, pins, and exclusions'),
+    s
+      .setName('list')
+      .setDescription('Show auto selections, pins, and exclusions')
+      .addIntegerOption((o) => o.setName('page').setDescription('Page number').setMinValue(1)),
   );
 for (const action of ['add', 'remove', 'restore'])
   watch.addSubcommand((s) =>
@@ -50,7 +65,9 @@ commands.push(
   new SlashCommandBuilder()
     .setName('chart')
     .setDescription('Show an annotated chart for a watched symbol')
-    .addStringOption((o) => o.setName('symbol').setDescription('Symbol').setRequired(true)),
+    .addStringOption((o) =>
+      o.setName('symbol').setDescription('Symbol').setRequired(true).setAutocomplete(true),
+    ),
   new SlashCommandBuilder()
     .setName('scan')
     .setDescription('Request a scan of discovery and watchlists'),
@@ -58,7 +75,11 @@ commands.push(
     .setName('idea')
     .setDescription('Inspect a signal and its full journal')
     .addStringOption((o) =>
-      o.setName('id').setDescription('24-character idea ID').setRequired(true),
+      o
+        .setName('id')
+        .setDescription('24-character idea ID')
+        .setRequired(true)
+        .setAutocomplete(true),
     ),
   new SlashCommandBuilder()
     .setName('status')
@@ -70,6 +91,9 @@ commands.push(
   new SlashCommandBuilder()
     .setName('config')
     .setDescription('Configure this server')
+    .addSubcommand((s) =>
+      s.setName('show').setDescription('Inspect current strategy, alert settings and routes'),
+    )
     .addSubcommand((s) =>
       s
         .setName('channels')
@@ -202,6 +226,86 @@ commands.push(
         ),
     ),
 );
+commands.push(
+  new SlashCommandBuilder()
+    .setName('health')
+    .setDescription('Read monitoring, provider and delivery health'),
+  new SlashCommandBuilder()
+    .setName('explain')
+    .setDescription('Explain cached setup qualification and rejection checks')
+    .addStringOption((o) =>
+      o
+        .setName('symbol')
+        .setDescription('Monitored symbol')
+        .setRequired(true)
+        .setAutocomplete(true),
+    ),
+  new SlashCommandBuilder()
+    .setName('queue')
+    .setDescription('Inspect failed deliveries or retry after operator review')
+    .addSubcommand((s) =>
+      s.setName('inspect').setDescription('Inspect pending and failed delivery diagnostics'),
+    )
+    .addSubcommand((s) =>
+      s
+        .setName('retry')
+        .setDescription('Retry a reviewed pending or dead delivery')
+        .addStringOption((o) => o.setName('id').setDescription('Event ID').setRequired(true)),
+    ),
+);
+const personalFollow = new SlashCommandBuilder()
+  .setName('follow')
+  .setDescription('Personal symbol/event filters for your digest');
+personalFollow.addSubcommand((s) =>
+  s.setName('list').setDescription('Inspect your personal follows'),
+);
+for (const action of ['add', 'remove'])
+  personalFollow.addSubcommand((s) => {
+    s.setName(action)
+      .setDescription(`${action} a personal symbol follow`)
+      .addStringOption((o) =>
+        o
+          .setName('symbol')
+          .setDescription('Monitored symbol')
+          .setRequired(true)
+          .setAutocomplete(true),
+      );
+    if (action === 'add')
+      s.addStringOption((o) =>
+        o
+          .setName('type')
+          .setDescription('Event filter')
+          .addChoices(
+            ...['all', 'entries', 'setups', 'updates', 'trackers'].map((value) => ({
+              name: value,
+              value,
+            })),
+          ),
+      );
+    return s;
+  });
+commands.push(
+  new SlashCommandBuilder()
+    .setName('ideas')
+    .setDescription('Browse current ideas')
+    .addSubcommand((s) =>
+      s.setName('active').setDescription('Show states, deadlines and quality pauses'),
+    ),
+  new SlashCommandBuilder()
+    .setName('digest')
+    .setDescription('Summarize active ideas and recent changes')
+    .addBooleanOption((o) => o.setName('personal').setDescription('Use your personal follows')),
+  new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('Inspect versioned signal outcomes including unknowns'),
+  new SlashCommandBuilder()
+    .setName('context')
+    .setDescription('Benchmark context and shared directional concentration')
+    .addStringOption((o) =>
+      o.setName('symbol').setDescription('Optional monitored symbol').setAutocomplete(true),
+    ),
+  personalFollow,
+);
 const learning = new SlashCommandBuilder()
   .setName('learning')
   .setDescription('Inspect learning reviews and control experimental filters');
@@ -247,7 +351,19 @@ export class CommandHandler {
     }
     const sub = i.options.getSubcommand(false),
       readOnly =
-        ['chart', 'idea', 'status'].includes(i.commandName) ||
+        [
+          'chart',
+          'idea',
+          'status',
+          'health',
+          'explain',
+          'ideas',
+          'digest',
+          'stats',
+          'context',
+        ].includes(i.commandName) ||
+        (i.commandName === 'config' && sub === 'show') ||
+        (i.commandName === 'follow' && sub === 'list') ||
         (i.commandName === 'watch' && sub === 'list') ||
         (i.commandName === 'debug' && sub === 'check') ||
         (i.commandName === 'learning' && ['report', 'cases', 'experiments'].includes(sub ?? ''));
@@ -255,6 +371,7 @@ export class CommandHandler {
       admin = member.permissions.has(PermissionFlagsBits.Administrator);
     if (
       !readOnly &&
+      i.commandName !== 'follow' &&
       !authorized(admin, [...member.roles.cache.keys()], this.store.settings().managerRole)
     ) {
       await (i.deferred
@@ -269,13 +386,77 @@ export class CommandHandler {
     try {
       if (
         this.budget.status().paused &&
-        i.commandName !== 'status' &&
+        !readOnly &&
+        !(i.commandName === 'queue' && sub === 'inspect') &&
         !(i.commandName === 'debug' && sub === 'check') &&
         !(i.commandName === 'learning' && readOnly)
       )
         throw new Error(
           'Free-plan resource budget exhausted; scanning and publication remain paused.',
         );
+      if (['ideas', 'digest', 'stats', 'context', 'follow'].includes(i.commandName)) {
+        const now = Date.now();
+        let result: unknown;
+        if (i.commandName === 'ideas') result = activeIdeas(this.store, now);
+        else if (i.commandName === 'digest')
+          result = digest(
+            this.store,
+            now,
+            i.options.getBoolean('personal') ? i.user.id : undefined,
+          );
+        else if (i.commandName === 'stats') result = statistics(this.store);
+        else if (i.commandName === 'context')
+          result = marketContext(this.store, now, i.options.getString('symbol')?.toUpperCase());
+        else
+          result =
+            sub === 'list'
+              ? preferences(this.store, i.user.id)
+              : follow(
+                  this.store,
+                  i.user.id,
+                  i.options.getString('symbol', true),
+                  (i.options.getString('type') ?? 'all') as Parameters<typeof follow>[3],
+                  sub === 'remove',
+                );
+        const text = JSON.stringify(result, null, 2);
+        await i.editReply({
+          content: reportSummary(i.commandName, result),
+          files: [{ attachment: Buffer.from(text), name: `${i.commandName}.json` }],
+        });
+        return;
+      }
+      if (
+        i.commandName === 'health' ||
+        i.commandName === 'explain' ||
+        i.commandName === 'queue' ||
+        (i.commandName === 'config' && sub === 'show')
+      ) {
+        let result: unknown;
+        if (i.commandName === 'health') result = health(this.store, Date.now(), this.releaseMode);
+        else if (i.commandName === 'explain') {
+          const symbol = i.options.getString('symbol', true).toUpperCase();
+          const instrument = this.store.monitored().find((x) => x.symbol === symbol);
+          if (!instrument) throw new Error('Symbol is not monitored.');
+          result = explain(this.store, instrument, Date.now());
+        } else if (i.commandName === 'queue') {
+          if (sub === 'retry') {
+            this.store.retryDelivery(i.options.getString('id', true));
+            result =
+              'Delivery scheduled for retry; existing receipts prevent duplicate successful sends.';
+          } else result = this.store.queueStatus(Date.now());
+        } else
+          result = {
+            settings: this.store.settings(),
+            strategy: this.store.strategy(),
+            version: publicationVersion(this.store),
+          };
+        const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        await i.editReply({
+          content: reportSummary(i.commandName, result),
+          files: [{ attachment: Buffer.from(text), name: `${i.commandName}.json` }],
+        });
+        return;
+      }
       if (i.commandName === 'learning') {
         const learning = new Learning(this.store);
         if (sub === 'promote' || sub === 'rollback') {
@@ -390,15 +571,23 @@ export class CommandHandler {
       if (i.commandName === 'watch') {
         if (sub === 'list') {
           const rows = this.store.watchRows();
-          await i.editReply(
-            rows
-              .map(
-                (r) =>
-                  `${r.instrument.symbol}: ${r.excluded ? 'excluded' : r.pinned ? 'manual pin' : r.auto ? 'auto-selected' : 'available'}`,
-              )
-              .join('\n')
-              .slice(0, 1900) || 'No symbols yet.',
-          );
+          const page = i.options.getInteger('page') ?? 1;
+          const pages = Math.max(1, Math.ceil(rows.length / 20));
+          if (page > pages) throw new Error(`Choose a page from 1 to ${pages}.`);
+          const format = (r: (typeof rows)[number]) =>
+            `${r.instrument.symbol}: ${r.excluded ? 'excluded' : r.pinned ? 'manual pin' : r.auto ? 'auto-selected' : 'available'}`;
+          await i.editReply({
+            content: `Watchlist · page ${page}/${pages}\n${
+              rows
+                .slice((page - 1) * 20, page * 20)
+                .map(format)
+                .join('\n') || 'No symbols yet.'
+            }`,
+            files:
+              rows.length > 20
+                ? [{ attachment: Buffer.from(rows.map(format).join('\n')), name: 'watchlist.txt' }]
+                : [],
+          });
           return;
         }
         const instrument = parseInstrument(
@@ -432,13 +621,16 @@ export class CommandHandler {
           const hash = i.options.getString('report_sha256', true);
           if (!/^[a-f0-9]{64}$/i.test(hash))
             throw new Error('Use the 64-character SHA-256 printed by the replay tool');
-          this.store.set('historical_validation', {
+          const validation = {
+            version: publicationVersion(this.store),
             reportSha256: hash,
             examples: i.options.getInteger('examples', true),
             failures: i.options.getInteger('failures', true),
             reviewer: i.user.id,
             at: Date.now(),
-          });
+          };
+          this.store.set('historical_validation', validation);
+          this.store.set(`historical_validation:${validation.version}`, validation);
           this.store.set('historical_replay_verified', true);
           await i.editReply(
             'Review attestation recorded. The seven-day private-channel soak and channel permissions are still required.',
@@ -572,14 +764,10 @@ export class CommandHandler {
           null,
           2,
         );
-        await i.editReply(
-          status.length <= 1950
-            ? status
-            : {
-                content: 'Status attached (full diagnostics).',
-                files: [{ attachment: Buffer.from(status), name: 'status.json' }],
-              },
-        );
+        await i.editReply({
+          content: reportSummary('health', health(this.store, Date.now(), this.releaseMode)),
+          files: [{ attachment: Buffer.from(status), name: 'status.json' }],
+        });
         return;
       }
       if (i.commandName === 'idea') {

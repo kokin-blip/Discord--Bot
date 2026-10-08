@@ -37,7 +37,23 @@ export function targetFor(
     level + s * width
   );
 }
-export function detect(data: Dataset, config: StrategyConfig, now: number): Candidate[] {
+export interface QualificationCheck {
+  name: string;
+  value: number | string;
+  requirement: string;
+  passed: boolean;
+}
+export interface QualificationAttempt {
+  at: number;
+  direction: Direction;
+  checks: QualificationCheck[];
+}
+export function detect(
+  data: Dataset,
+  config: StrategyConfig,
+  now: number,
+  observe?: (attempt: QualificationAttempt) => void,
+): Candidate[] {
   const daily = completed(data.daily, now),
     weekly = completed(data.weekly, now),
     benchmark = completed(data.benchmark, now);
@@ -74,8 +90,7 @@ export function detect(data: Dataset, config: StrategyConfig, now: number): Cand
       base = w.slice(-config.baseWeeks),
       high = Math.max(...base.map((b) => b.high)),
       low = Math.min(...base.map((b) => b.low));
-    if (!Number.isFinite(a) || a <= 0 || (high - low) / ((high + low) / 2) > config.maxBaseWidth)
-      continue;
+    if (!Number.isFinite(a) || a <= 0) continue;
     const current = sma(w, config.weeklyPeriod),
       old = sma(w.slice(0, -config.slopeWeeks), config.weeklyPeriod),
       slope = current / old - 1;
@@ -86,18 +101,60 @@ export function detect(data: Dataset, config: StrategyConfig, now: number): Cand
         level = s === 1 ? high : low,
         entry = level + s * 0.5 * a;
       const selfBTC = data.instrument.market === 'crypto' && data.instrument.symbol === 'BTC-USD';
-      if (
-        s * (w.at(-1)!.close - current) <= 0 ||
-        s * slope < -config.flatSlope ||
-        s * (breakout.close - level) < config.breakoutBuffer * a ||
-        rvol < config.breakoutVolume ||
-        (!selfBTC && (!Number.isFinite(rs) || s * rs <= 0)) ||
-        s * (refs.at(-1)!.close - sma(refs, config.marketPeriod)) <= 0
-      )
-        continue;
       const target = targetFor(prior, entry, level, high - low, direction, config.pivotLookback),
         rr = (s * (target - entry)) / Math.abs(entry - level);
-      if (rr < config.minimumRR) continue;
+      const checks: QualificationCheck[] = [
+        {
+          name: 'Weekly close versus moving average',
+          value: w.at(-1)!.close,
+          requirement: `${direction === 'bullish' ? 'above' : 'below'} ${current}`,
+          passed: s * (w.at(-1)!.close - current) > 0,
+        },
+        {
+          name: 'Weekly slope',
+          value: slope,
+          requirement: `directional slope >= ${-config.flatSlope}`,
+          passed: s * slope >= -config.flatSlope,
+        },
+        {
+          name: 'Base width',
+          value: (high - low) / ((high + low) / 2),
+          requirement: `<= ${config.maxBaseWidth}`,
+          passed: (high - low) / ((high + low) / 2) <= config.maxBaseWidth,
+        },
+        {
+          name: 'Breakout clearance',
+          value: s * (breakout.close - level),
+          requirement: `>= ${config.breakoutBuffer * a}`,
+          passed: s * (breakout.close - level) >= config.breakoutBuffer * a,
+        },
+        {
+          name: 'Relative volume',
+          value: rvol,
+          requirement: `>= ${config.breakoutVolume}`,
+          passed: rvol >= config.breakoutVolume,
+        },
+        {
+          name: 'Relative strength',
+          value: selfBTC ? 'BTC self-comparison skipped' : rs,
+          requirement: 'directional ratio change > 0',
+          passed: selfBTC || (Number.isFinite(rs) && s * rs > 0),
+        },
+        {
+          name: 'Benchmark trend',
+          value: refs.at(-1)!.close,
+          requirement: `${direction === 'bullish' ? 'above' : 'below'} ${sma(refs, config.marketPeriod)}`,
+          passed: s * (refs.at(-1)!.close - sma(refs, config.marketPeriod)) > 0,
+        },
+        {
+          name: 'Provisional reward/risk',
+          value: rr,
+          requirement: `>= ${config.minimumRR}`,
+          passed: rr >= config.minimumRR,
+        },
+      ];
+      observe?.({ at: breakout.end, direction, checks });
+      if (checks.some((check) => !check.passed)) continue;
       const candidate: Candidate = {
         id: stableId(data.instrument.id, direction, breakout.start, strategyVersion(config)),
         instrument: data.instrument,
@@ -119,29 +176,44 @@ export function detect(data: Dataset, config: StrategyConfig, now: number): Cand
           `At least ${config.minimumRR}R room to target`,
         ],
       };
-      const following = daily.slice(i + 1, i + 1 + config.retestBars);
-      for (let j = 0; j < following.length; j++) {
-        const b = following[j]!,
-          extreme = s === 1 ? b.low : b.high,
-          history = daily.slice(0, i + 1 + j);
-        // Any completed daily close back through the level invalidates the pending setup.
-        if (s * (b.close - level) < 0) break;
-        if (
-          Math.abs(extreme - level) <= config.retestTolerance * a &&
-          s * (b.close - b.open) > 0 &&
-          s * (b.close - (b.high + b.low) / 2) >= 0 &&
-          b.volume <=
-            config.retestVolume * mean(history.slice(-config.volumePeriod).map((x) => x.volume))
-        ) {
-          candidate.retest = b;
-          candidate.reasons.push('Low-volume daily retest qualified');
-          break;
-        }
-      }
+      candidate.retest = findRetest(data, candidate, config, now);
+      if (candidate.retest) candidate.reasons.push('Low-volume daily retest qualified');
       results.push(candidate);
     }
   }
   return results;
+}
+/** Progress a frozen breakout without requalifying it against a newer strategy/base. */
+export function findRetest(
+  data: Dataset,
+  candidate: Candidate,
+  config: StrategyConfig,
+  now: number,
+): Bar | undefined {
+  const daily = completed(data.daily, now);
+  const origin = daily.findIndex((b) => b.start === candidate.breakout.start);
+  if (origin < 0) return undefined;
+  const s = sign(candidate.direction);
+  for (let j = origin + 1; j < Math.min(daily.length, origin + 1 + config.retestBars); j++) {
+    const b = daily[j]!;
+    if (s * (b.close - candidate.level) < 0) break;
+    if (
+      Math.abs((s === 1 ? b.low : b.high) - candidate.level) <=
+        config.retestTolerance * candidate.atr &&
+      s * (b.close - b.open) > 0 &&
+      s * (b.close - (b.high + b.low) / 2) >= 0 &&
+      b.volume <=
+        config.retestVolume *
+          mean(
+            daily
+              .slice(0, j)
+              .slice(-config.volumePeriod)
+              .map((x) => x.volume),
+          )
+    )
+      return b;
+  }
+  return undefined;
 }
 export function rank(candidates: Candidate[]): Candidate[] {
   return [...candidates].sort(
