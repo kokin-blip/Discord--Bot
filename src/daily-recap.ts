@@ -2,6 +2,7 @@ import type { SignalEvent } from './domain.js';
 import type { Store } from './sql-store.js';
 import { announcement } from './announcements.js';
 import { stableId } from './core/strategy.js';
+import type { ShadowScore } from './shadow-learning.js';
 import type { Experiment, Family } from './learning.js';
 
 const DAY = 86_400_000;
@@ -14,6 +15,7 @@ interface Resolution {
   family: Family;
   outcome: DailyOutcome;
   experiments: { id: string; pass: boolean }[];
+  shadow?: ShadowScore;
 }
 export class DailyRecap {
   constructor(readonly store: Store) {}
@@ -128,6 +130,32 @@ export class DailyRecap {
       for (const [id, c] of shadow)
         learning.push(
           `${id}: in shadow testing, would have excluded ${c.failures} failed and ${c.successes} successful callouts; retained ${c.retained} outcomes. This is filter evidence, not demonstrated live improvement.`,
+        );
+      const modelReport = this.store.db
+        .prepare('SELECT body FROM learning_model_reports WHERE day=?')
+        .get(day) as { body: string } | undefined;
+      if (modelReport) learning.push(modelReport.body);
+      const models = new Map<
+        string,
+        { failures: number; successes: number; retained: number; unresolved: number }
+      >();
+      for (const r of resolutions) {
+        if (!r.shadow) continue;
+        const c = models.get(r.shadow.modelId) ?? {
+          failures: 0,
+          successes: 0,
+          retained: 0,
+          unresolved: 0,
+        };
+        if (!['success', 'failure'].includes(r.outcome)) c.unresolved++;
+        else if (r.shadow.retain) c.retained++;
+        else if (r.outcome === 'failure') c.failures++;
+        else c.successes++;
+        models.set(r.shadow.modelId, c);
+      }
+      for (const [id, c] of models)
+        learning.push(
+          `${id}: prospective shadow scores would exclude ${c.failures} failed and ${c.successes} successful calls; retain ${c.retained} decisive calls. ${c.unresolved} ambiguous/unknown/unconfirmed outcomes scored separately. Experimental scores, not proven live improvement.`,
         );
       const failures = resolutions.filter((r) => r.outcome === 'failure').length;
       if (failures)

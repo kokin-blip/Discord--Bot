@@ -42,6 +42,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS delivery_receipts(event_id TEXT NOT NULL REFERENCES events(id),destination TEXT NOT NULL,message_id TEXT NOT NULL,PRIMARY KEY(event_id,destination));
       CREATE TABLE IF NOT EXISTS cooldowns(key TEXT PRIMARY KEY,time INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS reversal_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learning_journal(id TEXT PRIMARY KEY,family TEXT NOT NULL,version TEXT NOT NULL,resolved INTEGER NOT NULL,observed_at INTEGER NOT NULL,body TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS learning_journal_training ON learning_journal(family,version,resolved,id);
+      CREATE TRIGGER IF NOT EXISTS learning_journal_no_update BEFORE UPDATE ON learning_journal BEGIN SELECT RAISE(ABORT,'Learning journal is append-only'); END;
+      CREATE TRIGGER IF NOT EXISTS learning_journal_no_delete BEFORE DELETE ON learning_journal BEGIN SELECT RAISE(ABORT,'Learning journal is append-only'); END;
+      CREATE TABLE IF NOT EXISTS learning_models(id TEXT PRIMARY KEY,day TEXT NOT NULL,body TEXT NOT NULL);
+      CREATE TRIGGER IF NOT EXISTS learning_models_no_update BEFORE UPDATE ON learning_models BEGIN SELECT RAISE(ABORT,'Learning models are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS learning_models_no_delete BEFORE DELETE ON learning_models BEGIN SELECT RAISE(ABORT,'Learning models are immutable'); END;
+      CREATE TABLE IF NOT EXISTS learning_model_reports(day TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learning_pending(id TEXT PRIMARY KEY,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learning_cases(id TEXT PRIMARY KEY,resolved INTEGER NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learning_counts(key TEXT PRIMARY KEY,body TEXT NOT NULL);

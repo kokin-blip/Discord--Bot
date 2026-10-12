@@ -124,5 +124,20 @@ export const releases: readonly BotRelease[] = [
     changedCommands: [],
     removedCommands: [],
   },
+  {
+    id: '2026-10-11-daily-shadow-model',
+    title: 'Daily learning journal and shadow model',
+    changes: [
+      'An immutable outcome journal now retains ordinary successes, failures and uncertain outcomes with frozen callout features and original shadow scores.',
+      'Daily Phoenix training tests small regularized models on later observations, excluding overlapping outcome windows; insufficient evidence is reported explicitly.',
+      'Daily recaps show model validation and prospective avoided-failure versus missed-success tradeoffs. Models remain experimental and cannot change live signals or bypass manager approval.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/learning report: daily shadow training evidence.',
+      '/status: shadow learning diagnostics.',
+    ],
+    removedCommands: [],
+  },
 ];
 export const currentRelease = releases.at(-1)!;

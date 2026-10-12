@@ -3,6 +3,7 @@ import type { Store } from './sql-store.js';
 import { stableId, strategyVersion } from './core/strategy.js';
 import { currentReversal, reversalDefaults, saveReversal } from './reversal-config.js';
 import { DailyRecap } from './daily-recap.js';
+import { ShadowLearning, type ShadowScore } from './shadow-learning.js';
 const DAY = 86_400_000;
 export type Family = 'reversal_warning' | 'strategy_setup' | 'strategy_entry';
 type Outcome = 'failure' | 'success' | 'unconfirmed' | 'ambiguous' | 'unknown';
@@ -19,6 +20,7 @@ interface Pending {
   family: Family;
   features: LearningFeatures;
   experiments: { id: string; pass: boolean }[];
+  shadow?: ShadowScore;
 }
 interface Group {
   family: Family;
@@ -146,6 +148,11 @@ export class Learning {
   }
   status(now = Date.now()) {
     return {
+      shadowModel: {
+        mode: 'shadow-only',
+        lastTrainingDay: this.store.get('shadow_learning_day', null),
+        report: new ShadowLearning(this.store).report(),
+      },
       paused: this.store.get('learning_paused', false),
       error: this.store.get('learning_error', null),
       backlog: Number(
@@ -175,7 +182,13 @@ export class Learning {
     );
   }
   private capture(e: SignalEvent, family: Family) {
-    const p: Pending = { event: e, family, features: e.learning!, experiments: [] };
+    const p: Pending = {
+      event: e,
+      family,
+      features: e.learning!,
+      experiments: [],
+      shadow: new ShadowLearning(this.store).score(e, family),
+    };
     for (const experiment of this.experiments().filter(
       (x) =>
         x.status === 'shadow' &&
@@ -190,11 +203,29 @@ export class Learning {
       .prepare('INSERT OR IGNORE INTO learning_pending VALUES(?,?)')
       .run(`${e.ideaId}:${family}`, JSON.stringify(p));
   }
-  private resolve(p: Pending, e: SignalEvent, result: Outcome, publish: boolean) {
+  private resolve(
+    p: Pending,
+    e: SignalEvent,
+    result: Outcome,
+    publish: boolean,
+    observedAt: number,
+  ) {
+    new ShadowLearning(this.store).record({
+      id: stableId('learning-sample', p.event.id, p.family),
+      family: p.family,
+      callout: p.event,
+      terminal: e,
+      features: p.features,
+      outcome: result,
+      resolved: e.marketTime,
+      observedAt,
+      shadow: p.shadow,
+    });
     new DailyRecap(this.store).record(p.event, e, {
       family: p.family,
       outcome: result,
       experiments: p.experiments,
+      shadow: p.shadow,
     });
     const context = `benchmark:${p.features.benchmarkTrend};alignment:${p.features.benchmarkTrend === 'unknown' ? 'unknown' : p.features.benchmarkAgreement ? 'aligned' : 'opposed'};volume:${p.features.breakoutRelativeVolume === undefined ? 'unknown' : p.features.breakoutRelativeVolume >= (p.features.breakoutThreshold ?? Infinity) + 0.5 ? 'strong' : 'standard'}`;
     const timeframe = p.event.tracker?.timeframe ?? (p.family === 'strategy_setup' ? '1d' : '15m');
@@ -318,6 +349,7 @@ export class Learning {
                 e,
                 result,
                 !e.recovery && now - e.marketTime < DAY,
+                now,
               );
           }
           if (!reversal && e.state === 'entry_triggered') this.capture(e, 'strategy_entry');
@@ -351,10 +383,12 @@ export class Learning {
               { ...pending.event, marketTime: cursor.lastBar },
               'unknown',
               false,
+              now,
             ),
           );
       }
       this.store.transaction(() => this.propose(now));
+      new ShadowLearning(this.store).daily(now);
       this.weekly(now);
       new DailyRecap(this.store).queue(now);
     }
@@ -444,9 +478,11 @@ export class Learning {
   }
   report(): string {
     const groups = this.rows<Group>('learning_counts');
-    if (!groups.length) return 'No resolved learning outcomes yet.';
+    if (!groups.length)
+      return `No resolved learning outcomes yet.\n${new ShadowLearning(this.store).report()}`;
     return [
       'Learning report · associations, not proven causes. Reference-price outcomes, not realized profit.',
+      new ShadowLearning(this.store).report(),
       ...groups.map((g) => {
         const n = decisive(g.counts);
         return `${g.family} · ${g.market} · ${g.direction} · ${g.timeframe} · ${g.version} · ${g.context}\n${total(g.counts)} observations; ${g.counts.failure}/${n} decisive outcomes failed (${n ? ((100 * g.counts.failure) / n).toFixed(1) : 'unknown'}%); successes ${g.counts.success}; unconfirmed ${g.counts.unconfirmed}; ambiguous ${g.counts.ambiguous}; unknown ${g.counts.unknown}. ${n < 10 ? 'Insufficient evidence (fewer than 10).' : ''}`;
