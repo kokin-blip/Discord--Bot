@@ -9,11 +9,10 @@ import { fixture, idea } from './fixtures.js';
 import type { SignalEvent } from '../src/domain.js';
 const DAY = 86_400_000;
 const start = Date.parse('2026-01-01T12:00:00-07:00');
+const data = fixture();
+const baseEvent = advance(idea(data), data, defaults, data.provenance.asOf).events.at(-1)!;
 function event(id: string, at: number): SignalEvent {
-  const data = fixture();
-  const e = structuredClone(
-    advance(idea(data), data, defaults, data.provenance.asOf).events.at(-1)!,
-  );
+  const e = structuredClone(baseEvent);
   Object.assign(e, { id, ideaId: id, marketTime: at, recordedAt: at, recovery: false });
   e.learning = { at, benchmarkTrend: 'up', benchmarkAgreement: true, close: 100, atr: 2 };
   return e;
