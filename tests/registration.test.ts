@@ -36,3 +36,42 @@ it('syncs global server commands once, including tracker controls, and retries a
     store.close();
   }
 });
+it('registers news reads and manager controls through the existing guild-bound definitions', async () => {
+  const store = new Store(':memory:');
+  try {
+    const rest = { put: vi.fn(async () => []) };
+    await syncCommands(store, rest, 'application');
+    const body = (rest.put.mock.calls as unknown as [string, { body: any[] }][])[0]![1].body;
+    const news = body.find((c) => c.name === 'news');
+    expect(news.contexts).toEqual([0]);
+    expect(news.integration_types).toEqual([0]);
+    expect(news.options.map((s: any) => s.name)).toEqual([
+      'latest',
+      'sentiment',
+      'sources',
+      'status',
+      'config',
+    ]);
+    expect(
+      news.options.find((s: any) => s.name === 'config').options.map((o: any) => o.name),
+    ).toEqual([
+      'enabled',
+      'marketaux',
+      'currents',
+      'gdelt',
+      'digest',
+      'alerts',
+      'marketaux_cap',
+      'currents_cap',
+      'gdelt_cap',
+      'review_sha256',
+      'reviewed_mappings',
+      'false_mappings',
+      'reviewed_alerts',
+      'false_alerts',
+      'free_plan_verified',
+    ]);
+  } finally {
+    store.close();
+  }
+});

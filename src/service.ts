@@ -1,3 +1,4 @@
+import { ThresholdEngine } from './threshold/engine.js';
 import type { Candidate, Dataset, Idea, Instrument, SignalEvent } from './domain.js';
 import { terminalStates } from './domain.js';
 import type { Store } from './sql-store.js';
@@ -109,6 +110,9 @@ export class SignalService {
         return;
       }
       const instruments = this.store.monitored();
+      const baseIds = new Set(this.store.baseMonitored().map((i) => i.id));
+      const thresholdDatasets = new Map<string, Dataset>();
+      const thresholdNewEntries = new Set<string>();
       await this.refresh(
         instruments.filter((i) => !pool.some((p) => p.id === i.id)),
         now,
@@ -127,6 +131,12 @@ export class SignalService {
           const dataset = await this.data.dataset(i, now),
             cutoff = now - (i.market === 'equity' ? 16 * 60_000 : 0);
           checkIntraday(dataset, cutoff - 2 * QUARTER, cutoff);
+          thresholdDatasets.set(i.id, dataset);
+          if (!baseIds.has(i.id)) {
+            this.store.set(`quality:${i.id}`, null);
+            this.store.set(`freshness:${i.id}`, dataset.intraday.at(-1)?.end ?? 0);
+            continue;
+          }
           const existing = this.store
             .activeIdeas()
             .filter((x) => x.candidate.instrument.id === i.id);
@@ -185,6 +195,8 @@ export class SignalService {
               event.recordedAt = now;
               event.recovery = recovery || event.marketTime < cutoff - 2 * QUARTER;
               if (event.recovery) recovered++;
+              if (!event.recovery && event.state === 'entry_triggered')
+                thresholdNewEntries.add(event.ideaId);
             }
             this.store.saveIdea(result.idea, result.events);
             if (
@@ -218,6 +230,7 @@ export class SignalService {
             dataset.intraday.at(-1)?.end ?? dataset.daily.at(-1)!.end,
           );
         } catch (e) {
+          thresholdDatasets.delete(i.id);
           this.quality(i, e);
           if (e instanceof Error && e.message === 'HISTORY_REVISED_REFRESH_REQUIRED') {
             for (const timeframe of ['1d', '15m'])
@@ -247,6 +260,15 @@ export class SignalService {
             );
           }
         }
+      }
+      try {
+        await new ThresholdEngine(this.store, this.data).poll(
+          thresholdDatasets,
+          now + Math.max(0, Date.now() - startedAt),
+          thresholdNewEntries,
+        );
+      } catch {
+        this.store.set('threshold_error', 'THRESHOLD_EVALUATION_FAILED');
       }
       if (recovery)
         this.notice(

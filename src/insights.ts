@@ -1,3 +1,5 @@
+import { Scorecard } from './scorecard.js';
+import { ThresholdStore } from './threshold/store.js';
 import { benchmarkTrend } from './core/learning-features.js';
 import { relativeStrength } from './core/indicators.js';
 import type { Store } from './sql-store.js';
@@ -80,22 +82,28 @@ export function explain(store: Store, instrument: Instrument, now: number) {
 export function health(store: Store, now: number, mode: string) {
   const queue = store.queueStatus(now);
   const last = store.get('last_scan', 0);
+  const setup = store.get<{ state: string; error?: string | null }>('channel_setup_status', {
+    state: 'pending',
+  });
   return {
-    mode,
+    mode: 'production',
+    channelSetup: setup,
+    scorecard: new Scorecard(store).summary().coverage,
+    threshold: new ThresholdStore(store).status(),
     paused: store.settings().paused,
     budgetPaused: store.get('budget_paused', false),
     monitoring: last
       ? `${Math.max(0, Math.round((now - last) / 60000))} minutes since last scan`
       : 'Waiting for initial scan',
-    publicationBlockers:
-      mode === 'production'
-        ? [
-            ...new Set([
-              ...productionBlockers(store, now),
-              ...store.get<string[]>('publication_blockers', []),
-            ]),
-          ]
-        : ['Private test-channel routing'],
+    publicationBlockers: [
+      ...new Set([
+        ...productionBlockers(store, now),
+        ...(setup.state === 'ready' ? [] : [setup.error ?? 'CHANNEL_SETUP_PENDING']),
+        ...store
+          .get<string[]>('publication_blockers', [])
+          .filter((b) => !['SEVEN_DAY_SOAK_REQUIRED', 'HISTORICAL_REPLAY_REQUIRED'].includes(b)),
+      ]),
+    ],
     queue: {
       pending: store.pendingCount(),
       oldestVisibleMinutes: queue[0]?.ageMinutes ?? 0,
@@ -189,7 +197,7 @@ export function digest(store: Store, now: number, user?: string) {
   const prefs = user ? preferences(store, user) : undefined;
   const events = store.db
     .prepare(
-      "SELECT body FROM events WHERE json_extract(body,'$.marketTime')>=? ORDER BY seq DESC LIMIT 200",
+      "SELECT body FROM events WHERE json_extract(body,'$.marketTime')>=? AND coalesce(json_extract(body,'$.kind'),'')<>'threshold_alert' ORDER BY seq DESC LIMIT 200",
     )
     .all(now - DAY) as { body: string }[];
   const matches = (e: SignalEvent, p: FollowPreference) =>

@@ -22,7 +22,13 @@ export default {
       ))
     )
       return new Response('Invalid signature', { status: 401 });
-    let message: { type: number; guild_id?: string; application_id?: string; token?: string };
+    let message: {
+      type: number;
+      guild_id?: string;
+      application_id?: string;
+      token?: string;
+      data?: { name?: string };
+    };
     try {
       message = JSON.parse(body);
     } catch {
@@ -79,7 +85,7 @@ export default {
             );
         }),
     );
-    return Response.json({ type: 5, data: { flags: 64 } });
+    return Response.json({ type: 5, data: { flags: message.data?.name === 'scorecard' ? 0 : 64 } });
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (!env.DISCORD_GUILD_ID) return;

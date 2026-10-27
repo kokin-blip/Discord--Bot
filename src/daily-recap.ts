@@ -4,6 +4,8 @@ import { announcement } from './announcements.js';
 import { stableId } from './core/strategy.js';
 import type { ShadowScore } from './shadow-learning.js';
 import type { Experiment, Family } from './learning.js';
+import { LearningEvaluations } from './learning-evaluation.js';
+import { LearningDiagnostics } from './learning-diagnostics.js';
 
 const DAY = 86_400_000;
 // Phoenix observes UTC-7 year-round, including weekends and market holidays.
@@ -135,6 +137,8 @@ export class DailyRecap {
         .prepare('SELECT body FROM learning_model_reports WHERE day=?')
         .get(day) as { body: string } | undefined;
       if (modelReport) learning.push(modelReport.body);
+      learning.push(new LearningEvaluations(this.store).report(true));
+      learning.push(new LearningDiagnostics(this.store).report(true));
       const models = new Map<
         string,
         { failures: number; successes: number; retained: number; unresolved: number }

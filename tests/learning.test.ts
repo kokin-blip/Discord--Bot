@@ -20,6 +20,7 @@ function entry(id: string, time: number, volume = 2): SignalEvent {
   e.recordedAt = time;
   e.candidate.id = id;
   e.recovery = false;
+  e.provenance = { ...e.provenance, provider: 'Alpaca', feed: 'SIP test data' };
   e.learning = {
     at: time,
     benchmarkTrend: 'up',
@@ -198,7 +199,7 @@ it.each(['bullish', 'bearish'] as const)(
     }
   },
 );
-it('proposes bounded filters, separates future evidence, accounts for blocked successes and promotes/rolls back', () => {
+it('proposes bounded filters but rejects the old age/count-only promotion standard', () => {
   const store = new Store(':memory:');
   try {
     const now = fixture().provenance.asOf;
@@ -218,26 +219,19 @@ it('proposes bounded filters, separates future evidence, accounts for blocked su
     expect(experiments.every((e) => e.pass.success === 0 && e.blocked.failure === 0)).toBe(true);
     const proposal = experiments[0]!;
     expect(() => learning.promote(proposal.id, now + DAY)).toThrow('NOT_REVIEW_READY');
-    for (let i = 0; i < 50; i++)
-      pair(
-        store,
-        `future-${i}`,
-        now + 2 * DAY,
-        i < 25 ? 2 : 1.5,
-        i % 2 ? 'time_exit' : 'invalidated',
-        i % 2 ? 2 : -2,
-      );
+    for (let i = 0; i < 50; i++) {
+      const callout = entry(`future-${i}`, now + 2 * DAY + i * 900000, i < 25 ? 2 : 1.5);
+      store.recordEvent(callout);
+      learning.process(callout.marketTime, 100);
+      store.recordEvent(terminal(callout, i % 2 ? 'time_exit' : 'invalidated', i % 2 ? 2 : -2));
+      learning.process(callout.marketTime + 900000, 100);
+    }
     learning.process(now + 30 * DAY, 200);
     const updated = learning.experiments().find((e) => e.id === proposal.id)!;
     expect(updated.blocked.success).toBeGreaterThan(0);
     expect(updated.blocked.failure).toBeGreaterThan(0);
-    expect(learning.ready(updated, now + 30 * DAY)).toBe(true);
-    const original = strategyVersion(store.strategy());
-    const next = learning.promote(proposal.id, now + 30 * DAY);
-    expect(next).not.toBe(original);
-    expect(store.get('historical_replay_verified', true)).toBe(false);
-    expect(store.version(original)).toEqual(defaults);
-    expect(learning.rollback(proposal.id)).toBe(original);
+    expect(learning.ready(updated, now + 30 * DAY)).toBe(false);
+    expect(() => learning.promote(proposal.id, now + 30 * DAY)).toThrow('NOT_REVIEW_READY');
     expect(store.strategy()).toEqual(defaults);
   } finally {
     store.close();
@@ -372,6 +366,7 @@ it('promotes and rolls back a benchmark experiment with an immutable reversal ve
             confirmationBars: 5,
             elapsed: 0,
           },
+          provenance: { ...base.provenance, provider: 'Alpaca', feed: 'SIP test data' },
           learning: {
             at: time,
             benchmarkTrend: aligned ? 'up' : 'down',
@@ -379,10 +374,12 @@ it('promotes and rolls back a benchmark experiment with an immutable reversal ve
           },
         };
       store.recordEvent(warning);
+      new Learning(store).process(time, 100);
       store.recordEvent({
         ...warning,
         id: `end-${id}`,
         marketTime: time + 900000,
+        recordedAt: time + 900000,
         tracker: {
           ...(warning.tracker as Extract<
             NonNullable<SignalEvent['tracker']>,
@@ -392,15 +389,18 @@ it('promotes and rolls back a benchmark experiment with an immutable reversal ve
           elapsed: 1,
         },
       });
+      new Learning(store).process(time + 900000, 100);
     };
     for (let n = 0; n < 20; n++) add(`initial-r-${n}`, now, n < 10, n >= 10);
     const learning = new Learning(store);
     learning.process(now + DAY, 100);
     const experiment = learning.experiments()[0]!;
     expect(experiment.filter).toBe('benchmark');
-    for (let n = 0; n < 50; n++) add(`future-r-${n}`, now + 2 * DAY, n < 25, n % 2 === 0);
-    learning.process(now + 30 * DAY, 200);
-    const next = learning.promote(experiment.id, now + 30 * DAY);
+    for (let n = 0; n < 100; n++)
+      add(`future-r-${n}`, now + (2 + Math.floor(n / 4)) * DAY, n % 5 !== 0, n % 5 === 0);
+    learning.process(now + 57 * DAY, 250);
+    for (let n = 0; n < 6; n++) learning.process(now + 57 * DAY, 250);
+    const next = learning.promote(experiment.id, now + 57 * DAY);
     expect(currentReversal(store).config.benchmarkAgreement).toBe(true);
     expect(next).not.toBe(version);
     expect(learning.rollback(experiment.id)).toBe(version);

@@ -14,6 +14,5 @@
   "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }],
   "vars": {
     "DISCORD_APPLICATION_ID": "1556528084809683056",
-    "RELEASE_MODE": "test",
   },
 }

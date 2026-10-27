@@ -6,7 +6,7 @@ const price = (n: number | undefined) =>
     ? 'Awaiting confirmation'
     : n.toLocaleString('en-US', { maximumFractionDigits: 6 });
 export function tradingView(symbol: string, market: string) {
-  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(market === 'crypto' ? `COINBASE:${symbol.replace('-', '')}` : symbol)}`;
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(market === 'crypto' ? `COINBASE:${symbol.replace('-', '')}` : symbol)}&interval=15`;
 }
 export function card(e: SignalEvent, options: OptionsContext[] = []): EmbedBuilder {
   const c = e.candidate,

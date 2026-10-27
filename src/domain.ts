@@ -1,3 +1,4 @@
+import type { OptionQuote, ThresholdAlert } from './threshold/types.js';
 export type Direction = 'bullish' | 'bearish';
 export type Market = 'equity' | 'crypto';
 export type Interval = '1d' | '15m';
@@ -89,7 +90,11 @@ export interface SignalEvent {
     | 'watch_tracker'
     | 'learning_review'
     | 'learning_report'
-    | 'announcement';
+    | 'announcement'
+    | 'news_report'
+    | 'threshold_alert';
+  threshold?: ThresholdAlert;
+  newsReport?: { deliveryId: string };
   announcement?: { title: string; body: string; imageUrl?: string };
   learning?: LearningFeatures;
   learningText?: string;
@@ -142,6 +147,7 @@ export interface MarketDataProvider {
     now: number,
   ): Promise<Map<string, Bar[]>>;
   calendar(start: number, end: number): Promise<Session[]>;
+  optionQuotes?(contracts: string[], now: number): Promise<OptionQuote[]>;
   options?(
     instrument: Instrument,
     context?: { direction: Direction; price: number; now: number },

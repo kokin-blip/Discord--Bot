@@ -1,3 +1,8 @@
+import { ThresholdStore } from '../threshold/store.js';
+import { thresholdPublishable } from '../threshold/publication.js';
+import { thresholdCard } from './threshold.js';
+import { newsEmbed } from './news.js';
+import type { NewsPublication } from '../news/publication.js';
 import { deliveryContext } from './delivery-context.js';
 import {
   AttachmentBuilder,
@@ -13,6 +18,7 @@ import type { Candidate } from '../domain.js';
 import type { DataService } from '../data.js';
 import { buttons, card, publicCard, isConfirmedExit, trackerCard, learningCard } from './cards.js';
 import { stableId } from '../core/strategy.js';
+import { announcement } from '../announcements.js';
 import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 export class DiscordPublisher implements Publisher {
   constructor(
@@ -25,6 +31,7 @@ export class DiscordPublisher implements Publisher {
     readonly budget: { image(now: number, bytes: number): boolean },
     readonly guildId: string,
     readonly clock: () => number = Date.now,
+    readonly newsPublication: NewsPublication | null = null,
   ) {}
   async validate(destination: string): Promise<GuildTextBasedChannel> {
     const channel = await this.client.channels.fetch(destination);
@@ -51,8 +58,179 @@ export class DiscordPublisher implements Publisher {
     if (!perms?.has(required)) throw new Error('MISSING_CHANNEL_PERMISSIONS');
     return channel;
   }
+  private async deliverNews(event: SignalEvent, destination: string): Promise<void> {
+    const publication = this.newsPublication;
+    if (!publication || destination !== publication.destination(event))
+      throw new Error('NEWS_DESTINATION_INVALID');
+    if (this.store.receipt(event.id, destination)) return;
+    if (!publication.report(event, this.clock())) {
+      publication.suppress(event);
+      return;
+    }
+    const channel = await this.validate(destination);
+    const recent = await channel.messages.fetch({ limit: 100 });
+    const found = recent.find(
+      (m) =>
+        m.author.id === (this.client.user?.id ?? channel.guild.members.me?.id) &&
+        m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
+    );
+    // Recheck after all pre-send I/O: configuration and rights can change while awaiting Discord.
+    const report = publication.report(event, this.clock()),
+      embed = report ? newsEmbed(report, event.id) : null;
+    if (!embed) {
+      publication.suppress(event);
+      return;
+    }
+    const message =
+      found ??
+      (await channel.send({
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+        nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
+        enforceNonce: true,
+      }));
+    this.store.saveReceipt(event.id, destination, message.id);
+  }
+  private async deliverThreshold(event: SignalEvent, destination: string): Promise<void> {
+    const state = new ThresholdStore(this.store);
+    const complete = (messageId: string) =>
+      this.store.transaction(() => {
+        this.store.saveReceipt(event.id, destination, messageId);
+        state.delivered(event, this.clock());
+      });
+    const receipt = this.store.receipt(event.id, destination);
+    if (receipt) {
+      complete(receipt);
+      return;
+    }
+    const channel = await this.validate(destination);
+    const recent = await channel.messages.fetch({ limit: 100 });
+    const found = recent.find(
+      (m) =>
+        m.author.id === (this.client.user?.id ?? channel.guild.members.me?.id) &&
+        m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
+    );
+    // Recover successful sends before checking changed conditions; never send an obsolete prompt.
+    if (found) {
+      complete(found.id);
+      return;
+    }
+    if (!thresholdPublishable(this.store, event, this.clock())) {
+      state.suppress(event);
+      return;
+    }
+    const message = await channel.send({
+      embeds: [thresholdCard(event)],
+      allowedMentions: { parse: [] },
+      nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
+      enforceNonce: true,
+    });
+    complete(message.id);
+  }
+  /** Rehome legacy discussions with context, without replaying an old actionable call. */
+  async continueDiscussion(event: SignalEvent): Promise<void> {
+    const managed = this.store.get<{
+      migrated?: boolean;
+      channels?: Partial<Record<string, string>>;
+    }>('managed_channels', {});
+    if (
+      (!managed.migrated && !Object.keys(managed.channels ?? {}).length) ||
+      event.debug ||
+      !(event.strategyVersion.startsWith('br-v1-') || event.tracker?.type === 'reversal')
+    )
+      return;
+    let root = this.store.thread(event.ideaId);
+    if (!root) return;
+    const channels = this.store.settings().channels;
+    const publicChannels = managed.migrated
+      ? Object.values(channels)
+      : [
+          ...Object.values(managed.channels ?? {}),
+          ...Object.values(this.store.get<Record<string, string>>('managed_channel_overrides', {})),
+        ];
+    if (!publicChannels.includes(root.channel)) {
+      const destination =
+        event.tracker?.type === 'reversal'
+          ? channels.watchlist
+          : channels[event.instrument.market === 'crypto' ? 'crypto_ideas' : 'equity_ideas'];
+      if (!destination || !publicChannels.includes(destination))
+        throw new Error('PUBLIC_DISCUSSION_DESTINATION_REQUIRED');
+      const contextId = stableId('live-discussion', event.ideaId, destination);
+      const savedContext = this.store.db
+        .prepare('SELECT body FROM events WHERE id=?')
+        .get(contextId) as { body: string } | undefined;
+      const idea = this.store.idea(event.ideaId);
+      const reversal =
+        event.tracker?.type === 'reversal'
+          ? (this.store.db
+              .prepare(
+                "SELECT body FROM events WHERE idea_id=? AND json_extract(body,'$.kind')='watch_tracker' AND json_extract(body,'$.tracker.type')='reversal' ORDER BY seq DESC LIMIT 1",
+              )
+              .get(event.ideaId) as { body: string } | undefined)
+          : undefined;
+      const latest: SignalEvent = reversal ? JSON.parse(reversal.body) : event;
+      const observedState =
+        latest.tracker?.type === 'reversal' ? latest.tracker.phase : (idea?.state ?? event.state);
+      const candidate = idea?.candidate ?? latest.candidate;
+      const context: SignalEvent = savedContext
+        ? JSON.parse(savedContext.body)
+        : announcement(
+            contextId,
+            `${event.instrument.symbol} · Discussion continued`,
+            `Historical context for ${event.ideaId}. Observed state when this context was recorded: ${observedState.replaceAll('_', ' ')}. Original ${event.direction} reference: ${candidate.entry ?? candidate.level}; invalidation ${candidate.level}; target ${candidate.target ?? 'unconfirmed'}. This continues an existing callout; it is not a new entry signal.`,
+            this.clock(),
+          );
+      this.store.recordEvent(context);
+      const channel = await this.validate(destination);
+      const receipt = this.store.receipt(contextId, destination);
+      const recent = receipt ? undefined : await channel.messages.fetch({ limit: 100 });
+      const message = receipt
+        ? await channel.messages.fetch(receipt)
+        : (recent!.find(
+            (m) =>
+              m.author.id === this.client.user?.id &&
+              m.embeds.some((e) => e.footer?.text.includes(`event ${contextId}`)),
+          ) ??
+          (await channel.send({
+            embeds: [
+              new EmbedBuilder()
+                .setTitle(context.announcement!.title)
+                .setDescription(context.announcement!.body)
+                .setTimestamp(context.marketTime)
+                .setFooter({ text: `event ${contextId}` }),
+            ],
+            allowedMentions: { parse: [] },
+            nonce: BigInt(`0x${stableId(contextId, destination).slice(0, 16)}`).toString(),
+            enforceNonce: true,
+          })));
+      this.store.saveReceipt(contextId, destination, message.id);
+      this.store.rehomeThread(event.ideaId, destination, message.id);
+      root = this.store.thread(event.ideaId)!;
+    }
+    if (!root.thread) {
+      const channel = await this.validate(root.channel);
+      const message = await channel.messages.fetch(root.message);
+      const thread = message.hasThread
+        ? await this.client.channels.fetch(message.id)
+        : await message.startThread({
+            name: `${event.instrument.symbol} · ${event.ideaId.slice(0, 6)}`,
+            autoArchiveDuration: 1440,
+          });
+      if (!thread?.isThread()) throw new Error('IDEA_THREAD_UNAVAILABLE');
+      this.store.saveThread(event.ideaId, root.channel, root.message, thread.id);
+    }
+  }
   async deliver(event: SignalEvent, destination: string, snapshot?: Dataset): Promise<void> {
     if (this.store.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
+    if (event.kind === 'threshold_alert') {
+      await this.deliverThreshold(event, destination);
+      return;
+    }
+    if (event.kind === 'news_report') {
+      await this.deliverNews(event, destination);
+      return;
+    }
+    await this.continueDiscussion(event);
     if (event.kind === 'learning_review') {
       const source = this.store.db
         .prepare('SELECT status FROM outbox WHERE event_id=?')

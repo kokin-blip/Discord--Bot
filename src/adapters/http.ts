@@ -13,10 +13,14 @@ export class HttpClient {
     private fetcher: typeof fetch = fetch.bind(globalThis),
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {}
-  async json<T>(url: URL | string, headers: Record<string, string> = {}): Promise<T> {
+  async json<T>(
+    url: URL | string,
+    headers: Record<string, string> = {},
+    maxAttempts = 5,
+  ): Promise<T> {
     const host = new URL(url).hostname,
       minGap = host.includes('coinbase') ? 1000 : 350;
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (this.work && (this.work.requests >= 24 || Date.now() - this.work.startedAt >= 25_000))
         throw new Error('PROVIDER_WORK_LIMIT');
       if (this.store?.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
@@ -47,7 +51,7 @@ export class HttpClient {
       try {
         response = await this.fetcher(url, { headers, signal: AbortSignal.timeout(20_000) });
       } catch {
-        if (attempt === 4) throw new Error(`NETWORK_UNAVAILABLE:${host}`);
+        if (attempt === maxAttempts - 1) throw new Error(`NETWORK_UNAVAILABLE:${host}`);
         await this.sleep(1000 * 2 ** attempt);
         continue;
       }
@@ -108,7 +112,7 @@ export class HttpClient {
         this.store?.set(`retry_after:${host}`, Date.now() + remaining);
         throw new Error('PROVIDER_RETRY_LATER');
       }
-      if (attempt === 4) {
+      if (attempt === maxAttempts - 1) {
         if (response.status === 429)
           this.store?.set(`retry_after:${host}`, Date.now() + Math.max(60_000, remaining));
         throw new Error(`DATA_HTTP_${response.status}:${host}`);

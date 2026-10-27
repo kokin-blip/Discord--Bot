@@ -1,3 +1,8 @@
+import { Scorecard } from '../scorecard.js';
+import { thresholdCommand, handleThreshold } from './threshold.js';
+import { ThresholdStore } from '../threshold/store.js';
+import { newsCommand, handleNews } from './news.js';
+import type { NewsPublication } from '../news/publication.js';
 import { reportSummary } from './report-summary.js';
 import {
   explain,
@@ -25,7 +30,7 @@ import { crypto, equity, benchmarkFor, type Instrument } from '../domain.js';
 import { SignalService } from '../service.js';
 import type { DiscordPublisher } from './publisher.js';
 import type { Candidate, Dataset } from '../domain.js';
-import { debugReport, debugSample } from './debug.js';
+import { debugReport } from './debug.js';
 import { CHART_STYLE_VERSION } from '../chart-snapshot.js';
 import { card, trackerCard, tradingView } from './cards.js';
 const watch = new SlashCommandBuilder()
@@ -138,7 +143,7 @@ commands.push(
     .addSubcommand((s) =>
       s
         .setName('validation')
-        .setDescription('Administrator attestation after reviewing real historical examples')
+        .setDescription('Record an optional administrator review of real historical examples')
         .addStringOption((o) =>
           o
             .setName('report_sha256')
@@ -203,27 +208,12 @@ commands.push(
 commands.push(
   new SlashCommandBuilder()
     .setName('debug')
-    .setDescription('Diagnose monitoring or test private-channel delivery')
+    .setDescription('Diagnose live monitoring and channel setup')
     .addSubcommand((s) =>
       s
         .setName('check')
         .setDescription('Inspect cached data, tracker progress and alert settings')
         .addStringOption((o) => o.setName('symbol').setDescription('Optional monitored symbol')),
-    )
-    .addSubcommand((s) =>
-      s
-        .setName('test')
-        .setDescription('Send a labeled synthetic chart alert to the private test channel')
-        .addStringOption((o) =>
-          o
-            .setName('tracker')
-            .setDescription('Synthetic alert type')
-            .addChoices(
-              { name: 'Volume', value: 'volume' },
-              { name: 'Range', value: 'range' },
-              { name: 'Range + volume', value: 'combined' },
-            ),
-        ),
     ),
 );
 commands.push(
@@ -318,7 +308,14 @@ for (const action of ['promote', 'rollback'])
       .setDescription(`${action} a reviewed experiment`)
       .addStringOption((o) => o.setName('id').setDescription('Experiment ID').setRequired(true)),
   );
-commands.push(learning);
+commands.push(
+  learning,
+  newsCommand,
+  thresholdCommand,
+  new SlashCommandBuilder()
+    .setName('scorecard')
+    .setDescription('Public lifetime correct and wrong callout totals'),
+);
 export function authorized(admin: boolean, roles: string[], manager?: string) {
   return admin || (!!manager && roles.includes(manager));
 }
@@ -339,8 +336,9 @@ export class CommandHandler {
     readonly guildId: string,
     readonly requestScan?: () => void,
     readonly runtimeVersion = 'development',
-    readonly testChannel?: string,
-    readonly releaseMode: 'test' | 'production' = 'test',
+    _legacyTestChannel?: string,
+    _legacyReleaseMode?: 'test' | 'production',
+    readonly newsPublication: NewsPublication | null = null,
   ) {}
   async handle(i: ChatInputCommandInteraction) {
     if (i.guildId !== this.guildId) {
@@ -360,9 +358,12 @@ export class CommandHandler {
           'ideas',
           'digest',
           'stats',
+          'scorecard',
           'context',
         ].includes(i.commandName) ||
         (i.commandName === 'config' && sub === 'show') ||
+        (i.commandName === 'threshold' && ['list', 'show'].includes(sub ?? '')) ||
+        (i.commandName === 'news' && ['latest', 'sentiment', 'sources'].includes(sub ?? '')) ||
         (i.commandName === 'follow' && sub === 'list') ||
         (i.commandName === 'watch' && sub === 'list') ||
         (i.commandName === 'debug' && sub === 'check') ||
@@ -372,6 +373,7 @@ export class CommandHandler {
     if (
       !readOnly &&
       i.commandName !== 'follow' &&
+      i.commandName !== 'threshold' &&
       !authorized(admin, [...member.roles.cache.keys()], this.store.settings().managerRole)
     ) {
       await (i.deferred
@@ -382,18 +384,58 @@ export class CommandHandler {
           }));
       return;
     }
-    await i.deferReply({ ephemeral: true });
+    await i.deferReply({ ephemeral: i.commandName !== 'scorecard' });
     try {
       if (
         this.budget.status().paused &&
         !readOnly &&
         !(i.commandName === 'queue' && sub === 'inspect') &&
+        i.commandName !== 'news' &&
+        i.commandName !== 'threshold' &&
         !(i.commandName === 'debug' && sub === 'check') &&
         !(i.commandName === 'learning' && readOnly)
       )
         throw new Error(
           'Free-plan resource budget exhausted; scanning and publication remain paused.',
         );
+      if (i.commandName === 'scorecard') {
+        const scorecard = new Scorecard(this.store);
+        await i.editReply({ content: scorecard.text(), allowedMentions: { parse: [] } });
+        return;
+      }
+      if (i.commandName === 'threshold') {
+        await handleThreshold(
+          i,
+          this.store,
+          authorized(admin, [...member.roles.cache.keys()], this.store.settings().managerRole),
+          Date.now(),
+        );
+        return;
+      }
+      if (i.commandName === 'news') {
+        try {
+          await handleNews(i, this.newsPublication, Date.now());
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            [
+              'News request caps may only be reduced.',
+              'Symbol is not monitored.',
+              'NEWS_ROLLOUT_REVIEW_BLOCKED',
+              'NEWS_SMOKE_TEST_MODE_REQUIRED',
+              'NEWS_SMOKE_PENDING',
+              'NEWS_STORAGE_DENIED',
+            ].includes(error.message)
+          ) {
+            await i.editReply(error.message);
+            return;
+          }
+          await i.editReply(
+            'News operation failed. Check permissions, request caps and /news status; market monitoring remains independent.',
+          );
+        }
+        return;
+      }
       if (['ideas', 'digest', 'stats', 'context', 'follow'].includes(i.commandName)) {
         const now = Date.now();
         let result: unknown;
@@ -432,7 +474,7 @@ export class CommandHandler {
         (i.commandName === 'config' && sub === 'show')
       ) {
         let result: unknown;
-        if (i.commandName === 'health') result = health(this.store, Date.now(), this.releaseMode);
+        if (i.commandName === 'health') result = health(this.store, Date.now(), 'production');
         else if (i.commandName === 'explain') {
           const symbol = i.options.getString('symbol', true).toUpperCase();
           const instrument = this.store.monitored().find((x) => x.symbol === symbol);
@@ -447,6 +489,9 @@ export class CommandHandler {
         } else
           result = {
             settings: this.store.settings(),
+            channelSetup: this.store.get('channel_setup_status', { state: 'pending' }),
+            scorecard: new Scorecard(this.store).summary().coverage,
+            threshold: new ThresholdStore(this.store).status(),
             strategy: this.store.strategy(),
             version: publicationVersion(this.store),
           };
@@ -471,7 +516,7 @@ export class CommandHandler {
             at: Date.now(),
           });
           await i.editReply(
-            `${sub}: ${version}. Open calls retain their original rules. Historical validation and the private-channel soak must pass before production publication.`,
+            `${sub}: ${version}. Open calls retain their original rules. Live publication uses the configured public channels; permissions, pause and resource checks still apply.`,
           );
         } else {
           const result =
@@ -483,6 +528,7 @@ export class CommandHandler {
                     : learning.experiments().map((e) => ({
                         ...e,
                         reviewReady: learning.ready(e, Date.now()),
+                        scorecard: learning.scorecard(e),
                         avoidedFailures: e.blocked.failure,
                         blockedSuccessfulCalls: e.blocked.success,
                         retainedOutcomes: e.pass,
@@ -516,13 +562,10 @@ export class CommandHandler {
             this.store,
             Date.now(),
             this.runtimeVersion,
-            this.testChannel,
+            undefined,
             i.options.getString('symbol') ?? undefined,
           );
-          const destination =
-            this.releaseMode === 'production'
-              ? this.store.settings().channels.watchlist
-              : this.testChannel;
+          const destination = this.store.settings().channels.watchlist;
           let permissions = 'No publishing destination configured';
           if (destination) {
             try {
@@ -535,8 +578,9 @@ export class CommandHandler {
           const json = JSON.stringify(
             {
               ...report,
-              releaseMode: this.releaseMode,
-              soakStarted: this.store.get('soak_start', null),
+              releaseMode: 'production',
+              channelSetup: this.store.get('channel_setup_status', { state: 'pending' }),
+              scorecard: new Scorecard(this.store).summary().coverage,
               historicalReplayVerified: this.store.get('historical_replay_verified', false),
               publishingPermissions: permissions,
               budget: this.budget.status(),
@@ -548,24 +592,7 @@ export class CommandHandler {
             content: `Debug report · ${permissions}. No alerts sent.`,
             files: [{ attachment: Buffer.from(json), name: 'debug-report.json' }],
           });
-        } else {
-          if (!this.testChannel)
-            throw new Error('Configure TEST_CHANNEL_ID to run a private delivery test.');
-          const { data, event } = debugSample(
-            Date.now(),
-            i.id,
-            (i.options.getString('tracker') ?? 'volume') as 'volume' | 'range' | 'combined',
-          );
-          this.store.recordEvent(event);
-          await this.publisher.deliver(event, this.testChannel, data);
-          const result = this.store.get<{ chartAttached: boolean } | null>(
-            'debug_last_delivery',
-            null,
-          );
-          await i.editReply(
-            `Synthetic test card delivered to <#${this.testChannel}>. Chart: ${result?.chartAttached ? 'attached' : 'unavailable or image allowance exhausted'}. Runtime: ${this.runtimeVersion}. Chart style: ${CHART_STYLE_VERSION}. Real strategy state and tracker cursors were unchanged.`,
-          );
-        }
+        } else throw new Error('This diagnostic command has been retired. Use /debug check.');
         return;
       }
       if (i.commandName === 'watch') {
@@ -574,6 +601,17 @@ export class CommandHandler {
           const page = i.options.getInteger('page') ?? 1;
           const pages = Math.max(1, Math.ceil(rows.length / 20));
           if (page > pages) throw new Error(`Choose a page from 1 to ${pages}.`);
+          const retained = this.store
+            .monitored()
+            .filter(
+              (instrument) =>
+                !rows.some(
+                  (r) => r.instrument.id === instrument.id && !r.excluded && (r.pinned || r.auto),
+                ),
+            );
+          const retainedText = retained.length
+            ? `\nRetained for active ideas or threshold contracts: ${retained.map((i) => i.symbol).join(' · ')}`
+            : '';
           const format = (r: (typeof rows)[number]) =>
             `${r.instrument.symbol}: ${r.excluded ? 'excluded' : r.pinned ? 'manual pin' : r.auto ? 'auto-selected' : 'available'}`;
           await i.editReply({
@@ -582,10 +620,15 @@ export class CommandHandler {
                 .slice((page - 1) * 20, page * 20)
                 .map(format)
                 .join('\n') || 'No symbols yet.'
-            }`,
+            }${retainedText}`.slice(0, 1850),
             files:
-              rows.length > 20
-                ? [{ attachment: Buffer.from(rows.map(format).join('\n')), name: 'watchlist.txt' }]
+              rows.length > 20 || retained.length > 0
+                ? [
+                    {
+                      attachment: Buffer.from(rows.map(format).join('\n') + retainedText),
+                      name: 'watchlist.txt',
+                    },
+                  ]
                 : [],
           });
           return;
@@ -633,7 +676,7 @@ export class CommandHandler {
           this.store.set(`historical_validation:${validation.version}`, validation);
           this.store.set('historical_replay_verified', true);
           await i.editReply(
-            'Review attestation recorded. The seven-day private-channel soak and channel permissions are still required.',
+            'Historical review recorded as optional research evidence. Live publication does not require a soak or attestation.',
           );
           return;
         }
@@ -653,13 +696,17 @@ export class CommandHandler {
         if (sub === 'channels') {
           const destination = i.options.getChannel('channel', true);
           await this.publisher.validate(destination.id);
-          settings.channels[i.options.getString('route', true) as (typeof routes)[number]] =
-            destination.id;
+          const route = i.options.getString('route', true) as (typeof routes)[number];
+          settings.channels[route] = destination.id;
           const role = i.options.getRole('manager_role');
           if (role) {
             if (!admin) throw new Error('Only administrators may change the manager role');
             settings.managerRole = role.id;
           }
+          this.store.set('managed_channel_overrides', {
+            ...this.store.get('managed_channel_overrides', {}),
+            [route]: destination.id,
+          });
         } else {
           settings.alerts = i.options.getBoolean('enabled', true);
           settings.options = i.options.getBoolean('options') ?? settings.options;
@@ -679,7 +726,7 @@ export class CommandHandler {
         }
         this.store.set('settings', settings);
         await i.editReply(
-          'Configuration saved. Publication requires all six routes or the private test-channel configuration.',
+          'Configuration saved. Public destinations are managed automatically; explicit channel overrides are preserved.',
         );
         return;
       }
@@ -700,7 +747,7 @@ export class CommandHandler {
         }
         this.store.set('scan_announcement', { id: i.id, requestedAt: Date.now() });
         await i.editReply(
-          'Scan requested. Completion will be announced publicly in the summaries channel (the test channel in test mode).',
+          'Scan requested. Completion will be announced publicly in the summaries channel.',
         );
         if (this.requestScan) this.requestScan();
         else
@@ -752,9 +799,11 @@ export class CommandHandler {
             pendingDeliveries: this.store.pendingCount(),
             activeIdeas: this.store.activeIdeas().length,
             activeEntries: this.store.activeEntries(),
-            soakStarted: this.store.get('soak_start', null),
+            channelSetup: this.store.get('channel_setup_status', { state: 'pending' }),
+            scorecard: new Scorecard(this.store).summary().coverage,
             budget,
             learning: new Learning(this.store).status(),
+            threshold: new ThresholdStore(this.store).status(),
             instruments: monitored.map((x) => ({
               symbol: x.symbol,
               pausedReason: this.store.get(`quality:${x.id}`, null),
@@ -765,7 +814,7 @@ export class CommandHandler {
           2,
         );
         await i.editReply({
-          content: reportSummary('health', health(this.store, Date.now(), this.releaseMode)),
+          content: reportSummary('health', health(this.store, Date.now(), 'production')),
           files: [{ attachment: Buffer.from(status), name: 'status.json' }],
         });
         return;
@@ -774,6 +823,12 @@ export class CommandHandler {
         const id = i.options.getString('id', true),
           journal = this.store.journal(id);
         if (!journal.length) throw new Error('Unknown idea ID');
+        if (journal.at(-1)?.kind === 'threshold_alert') {
+          await i.editReply(
+            `Use /threshold show id:${journal.at(-1)!.threshold!.monitorId} to inspect this exit-review monitor.`,
+          );
+          return;
+        }
         await i.editReply({
           embeds: [
             journal.at(-1)!.learningText

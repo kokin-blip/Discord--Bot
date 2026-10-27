@@ -1,3 +1,4 @@
+import type { OptionQuote } from '../threshold/types.js';
 import type {
   Bar,
   Instrument,
@@ -124,6 +125,33 @@ export class Alpaca implements MarketDataProvider {
       } while (token);
     }
     return result;
+  }
+  async optionQuotes(contracts: string[], _now: number): Promise<OptionQuote[]> {
+    const symbols = [...new Set(contracts)].sort();
+    if (!symbols.length) return [];
+    if (symbols.length > 20) throw new Error('THRESHOLD_QUOTE_BATCH_LIMIT');
+    const url = new URL('https://data.alpaca.markets/v1beta1/options/quotes/latest');
+    url.searchParams.set('symbols', symbols.join(','));
+    url.searchParams.set('feed', 'indicative');
+    const response = await this.http.json<{
+      quotes?: Record<string, { bp: number; ap: number; bs: number; as: number; t: string }>;
+    }>(url, this.headers, 2);
+    return symbols.flatMap((contract) => {
+      const q = response.quotes?.[contract];
+      return q
+        ? [
+            {
+              contract,
+              bid: q.bp,
+              ask: q.ap,
+              bidSize: q.bs,
+              askSize: q.as,
+              asOf: Date.parse(q.t),
+              feed: 'indicative' as const,
+            },
+          ]
+        : [];
+    });
   }
   async options(
     i: Instrument,

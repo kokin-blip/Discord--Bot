@@ -102,34 +102,18 @@ it('lets members inspect diagnostics during budget exhaustion without sending me
     store.close();
   }
 });
-it('requires manager authorization, a private test destination and remaining resource budget for delivery tests', async () => {
+it('retires synthetic delivery commands without allowing stale invocations to publish', async () => {
   const store = new Store(':memory:');
   try {
-    for (const [admin, paused, channel] of [
-      [false, false, 'test'],
-      [true, true, 'test'],
-      [true, false, undefined],
-    ] as const) {
-      const h = harness(store, 'test', admin, paused, channel);
-      await h.handler.handle(h.interaction as unknown as ChatInputCommandInteraction);
-      expect(h.publisher.deliver).not.toHaveBeenCalled();
-    }
-    expect(store.journal()).toHaveLength(0);
     const h = harness(store, 'test', true, false, 'private-test');
     await h.handler.handle(h.interaction as unknown as ChatInputCommandInteraction);
-    expect(h.publisher.deliver).toHaveBeenCalledTimes(1);
+    expect(h.publisher.deliver).not.toHaveBeenCalled();
+    expect(store.journal()).toHaveLength(0);
+    const command = commands.find((c) => c.toJSON().name === 'debug')!.toJSON();
+    expect(command.options?.map((o) => o.name)).toEqual(['check']);
     expect(h.interaction.editReply).toHaveBeenCalledWith(
-      expect.stringContaining('Runtime: version. Chart style: tv-simple-v3.'),
+      expect.objectContaining({ content: expect.stringContaining('retired') }),
     );
-    const calls = h.publisher.deliver.mock.calls as unknown as [any, string, any][];
-    expect(calls[0]![1]).toBe('private-test');
-    expect(calls[0]![0].debug).toBe(true);
-    expect(store.pendingCount()).toBe(0);
-    expect(store.activeIdeas()).toHaveLength(0);
-    expect(store.journal()).toHaveLength(1);
-    expect(store.get(`tracker:v1:${calls[0]![0].instrument.id}:15m`, null)).toBeNull();
-    const command = commands.find((c) => c.toJSON().name === 'debug')!.toJSON() as any;
-    expect(command.options.map((o: any) => o.name)).toEqual(['check', 'test']);
   } finally {
     store.close();
   }

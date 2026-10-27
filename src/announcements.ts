@@ -94,6 +94,14 @@ export function watchlistChanged(
       .join(' · ') || 'None';
   const selected = after.filter((r) => !r.excluded && (r.pinned || r.auto));
   const retained = store.monitored().filter((i) => !selected.some((r) => r.instrument.id === i.id));
+  const ideaIds = new Set(store.activeIdeas().map((i) => i.candidate.instrument.id));
+  const contractIds = new Set(
+    (
+      store.db
+        .prepare("SELECT body FROM threshold_monitors WHERE status='active' AND mode='contract'")
+        .all() as { body: string }[]
+    ).map((r) => (JSON.parse(r.body) as { instrument: { id: string } }).instrument.id),
+  );
   const previous = before.filter((r) => !r.excluded && (r.pinned || r.auto));
   const added = selected.filter((r) => !previous.some((p) => p.instrument.id === r.instrument.id));
   const removed = previous.filter(
@@ -101,6 +109,13 @@ export function watchlistChanged(
   );
   const body = `${reason}\n${added.length ? `Added: ${describe(added)}\n` : ''}${removed.length ? `Removed from selected watchlist: ${describe(removed)}\n` : ''}\n**Full current watchlist (${selected.length}/20)**\n**Manual pins (${selected.filter((r) => r.pinned).length}/10)**\n${describe(selected.filter((r) => r.pinned))}\n\n**Automatic selections (${selected.filter((r) => r.auto && !r.pinned).length}/10)**\n${describe(selected.filter((r) => r.auto && !r.pinned))}\n\n**Still monitored for active ideas**\n${
     retained
+      .filter((i) => ideaIds.has(i.id))
+      .map((i) => `${i.symbol} (${i.market})`)
+      .sort()
+      .join(' · ') || 'None'
+  }\n\n**Still monitored for active threshold contracts**\n${
+    retained
+      .filter((i) => contractIds.has(i.id))
       .map((i) => `${i.symbol} (${i.market})`)
       .sort()
       .join(' · ') || 'None'

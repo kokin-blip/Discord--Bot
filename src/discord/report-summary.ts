@@ -11,13 +11,13 @@ export function reportSummary(name: string, result: unknown): string {
   if (typeof result === 'string') return result;
   if (name === 'health') {
     const h = result as ReturnType<typeof health>;
-    return `Monitoring: ${h.monitoring} · ${h.paused ? 'paused' : 'enabled'}${h.budgetPaused ? ' · resource limit reached' : ''}\nPublication: ${h.publicationBlockers.join(', ') || 'ready'}\nDeliveries: ${h.queue.pending} pending · oldest visible ${h.queue.oldestVisibleMinutes.toFixed(0)}m · ${h.queue.reviewRequired} require review\n${
+    return `Monitoring: ${h.monitoring} · ${h.paused ? 'paused' : 'enabled'}${h.budgetPaused ? ' · resource limit reached' : ''}\nPublication: ${h.publicationBlockers.join(', ') || 'ready'}\nChannel setup: ${h.channelSetup.state}${h.channelSetup.error ? ` · ${h.channelSetup.error}` : ''}\nDeliveries: ${h.queue.pending} pending · oldest visible ${h.queue.oldestVisibleMinutes.toFixed(0)}m · ${h.queue.reviewRequired} require review\n${
       h.instruments
         .filter((i) => i.quality)
         .map((i) => `${i.symbol}: ${i.quality}`)
         .slice(0, 10)
         .join('\n') || 'No cached symbol-quality blockers.'
-    }\nFull diagnostics attached.`;
+    }\nThreshold: ${h.threshold.config.enabled ? 'enabled' : 'disabled'} · ${h.threshold.active} active · ${h.threshold.error ?? 'no cached error'}\nFull diagnostics attached.`;
   }
   if (name === 'explain') {
     const e = result as ReturnType<typeof explain>;

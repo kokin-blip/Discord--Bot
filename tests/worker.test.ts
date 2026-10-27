@@ -102,3 +102,54 @@ it('counts SQLite rows after consuming the cursor', () => {
   expect(sql.reads).toBe(42);
   expect(sql.writes).toBe(1);
 });
+it('continues market scans after a news migration failure in the CloudSql coordinator', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { SignalCoordinator } = await import('../src/worker/coordinator.js');
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE news_articles(id TEXT)');
+  const storage = {
+    sql: {
+      databaseSize: 0,
+      exec(sql: string, ...params: (string | number | null)[]) {
+        let rows: unknown[] = [];
+        if (params.length || /^\s*(SELECT|PRAGMA)/i.test(sql))
+          rows = db.prepare(sql).all(...params);
+        else db.exec(sql);
+        return { toArray: () => rows, rowsRead: rows.length, rowsWritten: 0 };
+      },
+    },
+    transactionSync<T>(fn: () => T): T {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = fn();
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
+  } as unknown as DurableObjectStorage;
+  const ctx = { storage } as import('@cloudflare/workers-types').DurableObjectState;
+  const env = {
+    DISCORD_GUILD_ID: '123',
+    RELEASE_MODE: 'test',
+  } as import('../src/worker/types.js').Env;
+  const coordinator = new SignalCoordinator(ctx, env);
+  try {
+    expect(coordinator.news).toBeNull();
+    expect(coordinator.newsInitializationError).toBe('NEWS_INITIALIZATION_FAILED');
+    // No discovery or instruments: exercise the real scan without network access.
+    await coordinator.service.scan(Date.now(), false, true, false);
+    expect(coordinator.store.get('last_scan', 0)).toBeGreaterThan(0);
+    expect(coordinator.service.running).toBe(false);
+  } finally {
+    await coordinator.client.destroy();
+    db.close();
+  }
+});
+
+it('allows only finite news diagnostics and rejects unknown news error strings', () => {
+  expect(diagnosticCode(new Error('NEWS_TIMEOUT'))).toBe('NEWS_TIMEOUT');
+  expect(diagnosticCode(new Error('NEWS_PRIVATE_KEY'))).toBe('NEWS_RUNTIME_FAILED');
+});

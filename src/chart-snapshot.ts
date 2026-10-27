@@ -1,6 +1,6 @@
 import type { Candidate, Dataset, SignalEvent } from './domain.js';
 import { chartView } from './chart-view.js';
-export const CHART_STYLE_VERSION = 'tv-simple-v3';
+export const CHART_STYLE_VERSION = 'tv-simple-v4';
 export async function chartSnapshot(
   launch: () => Promise<any>,
   library: string,
@@ -58,6 +58,7 @@ export async function chartSnapshot(
           ['overview', view.context],
         ] as const) {
           const primary = id === 'main';
+          const call = primary ? view.call : view.contextCall;
           const chart = L.createChart(document.getElementById(id), {
             width: 1200,
             height: primary ? 610 : 180,
@@ -136,22 +137,21 @@ export async function chartSnapshot(
                 color: b.close >= b.open ? '#26a69a70' : '#ef535070',
               })),
             );
-            if (view.call) {
-              const sell = view.label === 'SELL' || view.label === 'EXIT';
-              const above = sell || direction === 'bearish';
-              L.createSeriesMarkers(candles, [
-                {
-                  time: view.call.start / 1000,
-                  position: above ? 'aboveBar' : 'belowBar',
-                  color: sell ? '#e9b35d' : direction === 'bearish' ? '#ef5350' : '#26a69a',
-                  shape: above ? 'arrowDown' : 'arrowUp',
-                  text: view.label,
-                },
-              ]);
-            }
           }
-          const markerIndex =
-            primary && view.call ? bars.findIndex((b) => b.start === view.call!.start) : -1;
+          if (call) {
+            const sell = view.label === 'SELL' || view.label === 'EXIT';
+            const above = sell || direction === 'bearish';
+            L.createSeriesMarkers(candles, [
+              {
+                time: call.start / 1000,
+                position: above ? 'aboveBar' : 'belowBar',
+                color: sell ? '#e9b35d' : direction === 'bearish' ? '#ef5350' : '#26a69a',
+                shape: above ? 'arrowDown' : 'arrowUp',
+                text: view.label,
+              },
+            ]);
+          }
+          const markerIndex = call ? bars.findIndex((b) => b.start === call.start) : -1;
           chart.timeScale().setVisibleLogicalRange({
             from:
               bars.length < 10

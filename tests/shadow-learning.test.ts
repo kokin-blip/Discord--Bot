@@ -14,6 +14,7 @@ const baseEvent = advance(idea(data), data, defaults, data.provenance.asOf).even
 function event(id: string, at: number): SignalEvent {
   const e = structuredClone(baseEvent);
   Object.assign(e, { id, ideaId: id, marketTime: at, recordedAt: at, recovery: false });
+  e.provenance = { ...e.provenance, provider: 'Alpaca', feed: 'SIP unit test data' };
   e.learning = { at, benchmarkTrend: 'up', benchmarkAgreement: true, close: 100, atr: 2 };
   return e;
 }
@@ -106,6 +107,12 @@ it('trains a bounded daily model with chronological validation, preserves versio
       shadow.score({ ...high, strategyVersion: 'different' }, 'strategy_entry'),
     ).toBeUndefined();
     shadow.daily(now + DAY);
+    expect(
+      shadow.score(
+        { ...high, marketTime: now + DAY + 900000, recordedAt: now + DAY + 900000 },
+        'strategy_entry',
+      )?.modelId,
+    ).toBe(model.id);
     expect(store.db.prepare('SELECT body FROM learning_models').all()).toHaveLength(2);
     expect(store.db.prepare('SELECT body FROM learning_models').all()[0]).toEqual(models[0]);
   } finally {

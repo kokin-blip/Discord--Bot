@@ -4,6 +4,8 @@ export class CloudSql implements SqlDatabase {
   mode = 'cloud';
   reads = 0;
   writes = 0;
+  totalReads = 0;
+  totalWrites = 0;
   constructor(readonly storage: DurableObjectStorage) {}
   exec(sql: string) {
     return this.query(sql, []);
@@ -13,6 +15,8 @@ export class CloudSql implements SqlDatabase {
     const rows = cursor.toArray();
     this.reads += cursor.rowsRead;
     this.writes += cursor.rowsWritten;
+    this.totalReads += cursor.rowsRead;
+    this.totalWrites += cursor.rowsWritten;
     return { rows, changes: cursor.rowsWritten };
   }
   prepare(sql: string) {

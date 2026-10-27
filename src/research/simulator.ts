@@ -1,5 +1,6 @@
 import type { Dataset, SignalEvent } from '../domain.js';
 import { validateBars } from '../core/time.js';
+import { beginExecution, stepExecution } from './execution.js';
 export interface SimulationCosts {
   slippageBps: number;
   feeBps: number;
@@ -53,7 +54,6 @@ export function simulate(
       const data = datasets.find((d) => d.instrument.id === e.instrument.id);
       const bars = data?.intraday.filter((b) => b.start >= e.marketTime) ?? [];
       const first = bars[0];
-      const s = e.direction === 'bullish' ? 1 : -1;
       const base = { ideaId: e.ideaId, symbol: e.instrument.symbol, version: e.strategyVersion };
       if (!first)
         return {
@@ -62,66 +62,36 @@ export function simulate(
           reason: 'No next bar for execution',
           sample: 'unassigned',
         };
-      const entry = first.open * (1 + (s * costs.slippageBps) / 10000);
-      const risk = s * (entry - e.candidate.level);
-      const target = e.candidate.target;
       const sample = first.start >= holdoutAt ? 'holdout' : 'development';
-      if (risk <= 0 || target === undefined || s * (target - entry) <= 0)
-        return {
-          ...base,
-          status: 'skipped',
-          reason: 'Next-bar gap invalidates entry geometry',
-          sample,
-        };
+      let execution = beginExecution(
+        first,
+        e.direction,
+        e.candidate.level,
+        e.candidate.target,
+        costs,
+      );
       const timeExit = events
         .filter(
           (x) => x.ideaId === e.ideaId && x.state === 'time_exit' && x.marketTime >= e.marketTime,
         )
-        .sort((a, b) => a.marketTime - b.marketTime)[0];
-      let exit: number | undefined,
-        exitAt: number | undefined,
-        reason = 'No observed exit',
-        ambiguous = false;
-      for (const b of bars) {
-        const stop = s * (b.open - e.candidate.level) <= 0;
-        const stopTouched = s === 1 ? b.low <= e.candidate.level : b.high >= e.candidate.level;
-        const targetTouched = s === 1 ? b.high >= target : b.low <= target;
-        if (timeExit && b.start >= timeExit.marketTime) {
-          exit = b.open;
-          reason = 'Time exit at next-bar open';
-        } else if (stop || stopTouched) {
-          exit = stop ? b.open : e.candidate.level;
-          reason = stop ? 'Gap through stop' : 'Stop touched';
-          ambiguous = stopTouched && targetTouched;
-        } else if (targetTouched) {
-          exit = target;
-          reason = 'Final target touched';
-        } else if (timeExit && b.start >= timeExit.marketTime) {
-          exit = b.open;
-          reason = 'Time exit at next-bar open';
-        }
-        if (exit !== undefined) {
-          exitAt = b.start;
-          break;
-        }
+        .sort((a, b) => a.marketTime - b.marketTime)[0]?.marketTime;
+      for (const bar of bars) {
+        execution = stepExecution(
+          execution,
+          bar,
+          e.direction,
+          e.candidate.level,
+          e.candidate.target!,
+          timeExit,
+          costs,
+        );
+        if (execution.status !== 'open') break;
       }
-      if (exit === undefined)
-        return { ...base, status: 'unknown', reason, entry, entryAt: first.start, sample };
-      const executedExit = exit * (1 - (s * costs.slippageBps) / 10000);
-      const fees = ((entry + executedExit) * costs.feeBps) / 10000;
-      const net = s * (executedExit - entry) - fees;
       return {
         ...base,
-        status: 'closed',
-        entry,
-        entryAt: first.start,
-        exit: executedExit,
-        exitAt,
-        reason,
-        ambiguous,
+        ...execution,
+        status: execution.status === 'open' ? 'unknown' : execution.status,
         sample,
-        netPerUnit: net,
-        rMultiple: net / risk,
       };
     });
   const summary = (sample: string) => {

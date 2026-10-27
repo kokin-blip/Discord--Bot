@@ -9,16 +9,22 @@ export function chartView(data: Dataset, candidate?: Candidate, event?: SignalEv
   const callTime = snapshot
     ? (candidate?.retest ?? candidate?.breakout)?.end
     : (event?.marketTime ?? candidate?.confirmedAt);
+  const dailyCall =
+    event?.tracker !== undefined
+      ? event.tracker.timeframe === '1d'
+      : snapshot || event?.state === 'watching' || event?.state === 'setup_ready';
+  // Default to completed 15-minute bars; explicit daily trackers keep their own timeframe.
   const useIntraday =
     event?.tracker?.timeframe === '15m' ||
-    (!snapshot &&
-      event?.state !== 'watching' &&
-      event?.state !== 'setup_ready' &&
-      event?.tracker?.timeframe !== '1d' &&
-      callTime !== undefined &&
-      intraday.some((b) => b.end === callTime));
+    (event?.tracker?.timeframe !== '1d' && intraday.length > 0);
   const bars = (useIntraday ? intraday : daily).slice(-100);
-  const call = bars.find((b) => b.end === callTime);
+  const context = useIntraday
+    ? daily.slice(-100)
+    : data.weekly.filter((b) => b.end <= cutoff).slice(-60);
+  // A daily signal belongs on its daily candle, even when the primary view is 15m.
+  const call = useIntraday && dailyCall ? undefined : bars.find((b) => b.end === callTime);
+  const contextCall =
+    useIntraday && dailyCall ? context.find((b) => b.end === callTime) : undefined;
   const exit =
     event &&
     candidate?.entry !== undefined &&
@@ -47,11 +53,10 @@ export function chartView(data: Dataset, candidate?: Candidate, event?: SignalEv
                 (candidate?.confirmedAt ? 'Entry' : 'Market chart'));
   return {
     bars,
-    context: useIntraday
-      ? daily.slice(-100)
-      : data.weekly.filter((b) => b.end <= cutoff).slice(-60),
+    context,
     intraday: useIntraday,
     call,
+    contextCall,
     label,
   };
 }

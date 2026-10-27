@@ -1,3 +1,4 @@
+import { configuredChannels, reviewedNews } from './live-fixtures.js';
 import { expect, it } from 'vitest';
 import { Store } from '../src/storage.js';
 import { queueRelease } from '../src/announcements.js';
@@ -193,13 +194,12 @@ it('delivers queued public announcements despite provider failure without cleari
       },
       publisher,
     });
+    configuredChannels(coordinator);
     store.pin(crypto('BTC-USD'));
     const response = await coordinator.fetch(new Request('https://internal/tick'));
     expect(response.ok).toBe(true);
     expect(publisher.deliver).toHaveBeenCalledTimes(2);
-    expect(publisher.deliver.mock.calls.every((c: unknown[]) => c[1] === 'private-test')).toBe(
-      true,
-    );
+    expect(publisher.deliver.mock.calls.every((c: unknown[]) => c[1] === 'public')).toBe(true);
     expect(store.get('last_error', null)).toBe('PROVIDER_RETRY_LATER');
     expect(store.get('last_error_stage', null)).toBe('daily_history');
     expect(store.pendingCount()).toBe(0);

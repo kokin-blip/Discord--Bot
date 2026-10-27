@@ -66,7 +66,7 @@ function harness(store: Store) {
     'guild',
     () => fixture().provenance.asOf,
   );
-  return { main, updates, thread, charts, publisher };
+  return { main, updates, thread, charts, publisher, makeChannel };
 }
 function events(direction: 'bullish' | 'bearish' = 'bullish') {
   const data = fixture(direction),
@@ -86,6 +86,108 @@ function events(direction: 'bullish' | 'bearish' = 'bullish') {
     advanced: advance(original, data, defaults, data.provenance.asOf),
   };
 }
+it('rehomes legacy private discussion into labeled public context without replaying an entry', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      e = events();
+    const old = h.makeChannel('legacy-thread', true);
+    const source = { ...e.advanced.events.at(-1)!, id: 'old-exit', state: 'invalidated' as const };
+    store.enqueue(source, 'updates');
+    store.saveReceipt(source.id, 'legacy', 'old-message');
+    store.delivered(source.id);
+    store.saveThread(source.ideaId, 'legacy', 'old-root', old.id);
+    store.set('settings', {
+      ...store.settings(),
+      channels: { equity_ideas: 'main', crypto_ideas: 'main', updates: 'updates' },
+    });
+    store.set('managed_channels', { migrated: true });
+    const review = {
+      ...source,
+      id: 'review',
+      kind: 'learning_review' as const,
+      sourceEventId: source.id,
+      learningText: 'Observed failure, not a new callout.',
+    };
+    store.enqueue(review, 'updates');
+    await h.publisher.deliver(review, 'updates');
+    await h.publisher.deliver(review, 'updates');
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().description).toContain(
+      'not a new entry signal',
+    );
+    expect(h.updates.send).not.toHaveBeenCalled();
+    expect(old.send).not.toHaveBeenCalled();
+    expect(h.thread.send).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(store.thread(source.ideaId)).toMatchObject({ channel: 'main', thread: 'thread' });
+    expect(store.get(`historical_thread:${source.ideaId}:old-root`, null)).toMatchObject({
+      channel: 'legacy',
+      thread: old.id,
+    });
+    expect(store.receipt(source.id, 'legacy')).toBe('old-message');
+  } finally {
+    store.close();
+  }
+});
+it('recovers a rehomed discussion after thread creation fails without reposting public context', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      e = events().advanced.events.at(-1)!;
+    store.saveThread(e.ideaId, 'legacy', 'old-root', 'old-thread');
+    store.set('settings', {
+      ...store.settings(),
+      channels: { equity_ideas: 'main', crypto_ideas: 'main' },
+    });
+    store.set('managed_channels', { migrated: true });
+    const send = h.main.send.getMockImplementation();
+    h.main.send.mockImplementationOnce(async (payload: any) => {
+      const message = await send(payload);
+      message.startThread.mockRejectedValueOnce(new Error('thread unavailable'));
+      return message;
+    });
+    await expect(h.publisher.continueDiscussion(e)).rejects.toThrow('thread unavailable');
+    expect(store.thread(e.ideaId)).toMatchObject({ channel: 'main', thread: undefined });
+    await h.publisher.continueDiscussion(e);
+    expect(h.main.send).toHaveBeenCalledTimes(1);
+    expect(store.thread(e.ideaId)?.thread).toBe('thread');
+    expect(h.charts.render).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});
+it('uses current frozen idea state and a public root during partial channel migration', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      e = events();
+    store.saveIdea({ ...e.advanced.idea, state: 'final_target' }, [], false);
+    store.saveThread(e.watching.ideaId, 'legacy', 'old-root', 'old-private-thread');
+    // An unrelated unconverted route still references legacy, but it is not a public root.
+    store.set('settings', {
+      ...store.settings(),
+      channels: {
+        equity_ideas: 'main',
+        crypto_ideas: 'main',
+        operations: 'legacy',
+      },
+    });
+    store.set('managed_channels', {
+      migrated: false,
+      channels: { equity_ideas: 'main', crypto_ideas: 'main' },
+    });
+    await h.publisher.continueDiscussion(e.watching);
+    expect(store.thread(e.watching.ideaId)).toMatchObject({ channel: 'main', thread: 'thread' });
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().description).toContain('final target');
+    expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().description).toContain(
+      'not a new entry signal',
+    );
+    expect(h.charts.render).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});
 it.each(['bullish', 'bearish'] as const)(
   'posts %s setup, retest and entry publicly with thread history',
   async (direction) => {
@@ -298,11 +400,11 @@ it('renders and delivers a synthetic debug snapshot without market-data access o
       'DEBUG TEST · SYNTHETIC',
     );
     expect(h.main.send.mock.calls[0][0].embeds[0].toJSON().image.url).toBe(
-      `attachment://chart-tv-simple-v3-${event.id}.png`,
+      `attachment://chart-tv-simple-v4-${event.id}.png`,
     );
     expect(store.get('debug_last_delivery', {})).toMatchObject({
       chartAttached: true,
-      chartStyleVersion: 'tv-simple-v3',
+      chartStyleVersion: 'tv-simple-v4',
       channel: 'main',
     });
     expect(store.pendingCount()).toBe(0);

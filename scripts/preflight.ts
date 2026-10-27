@@ -8,7 +8,6 @@ checks.secrets = [
   'DISCORD_GUILD_ID',
   'ALPACA_API_KEY',
   'ALPACA_API_SECRET',
-  'TEST_CHANNEL_ID',
 ].every((k) => !!process.env[k]);
 checks.freePlanConfirmed = process.env.FREE_PLAN_CONFIRMED === 'true';
 checks.commandsValid = commands.every((c) => !!c.toJSON().name);
@@ -41,7 +40,7 @@ const report = {
   createdAt: Date.now(),
   passed: Object.values(checks).every(Boolean),
   checks,
-  note: 'This local check does not prove deployed Worker CPU limits, account-wide free allowances, permissions, or the seven-day soak. Verify those on Cloudflare.',
+  note: 'This local check does not prove deployed Worker CPU limits, account-wide free allowances, permissions, or automatic channel creation. Verify those on Cloudflare.',
 };
 await mkdir('output', { recursive: true });
 await writeFile('output/preflight.json', JSON.stringify(report, null, 2));

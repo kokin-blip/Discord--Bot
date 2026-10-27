@@ -21,32 +21,35 @@ Copy `.env.example` to `.env` for registration/preflight tools and `.dev.vars.ex
 
 ## Commands
 
-| Command                          | Purpose                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------- |
-| `/watch add/remove/restore/list` | Up to 10 manual pins, persistent exclusions, automatic selections             |
-| `/chart symbol`                  | Annotated weekly/daily chart of a monitored instrument                        |
-| `/scan`                          | Queue discovery and monitoring on the next scheduled invocation               |
-| `/idea id`                       | Original idea levels and append-only lifecycle history                        |
-| `/status`                        | Scan timestamps, instrument freshness/quality, outbox, pause and budget state |
-| `/config channels`               | Six publishing routes; optional manager role                                  |
-| `/config strategy`               | Validated numeric threshold changes with immutable strategy versions          |
-| `/config alerts`                 | Master alert switch, volume/reversal toggles, multiplier, and options context |
-| `/config validation`             | Administrator attestation after reviewing real historical examples            |
-| `/pause`, `/resume`              | Pause/resume shared scans and publication within resource limits              |
+| Command                          | Purpose                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------- |
+| `/watch add/remove/restore/list` | Up to 10 manual pins, persistent exclusions, automatic selections                   |
+| `/chart symbol`                  | Annotated weekly/daily chart of a monitored instrument                              |
+| `/scan`                          | Queue discovery and monitoring on the next scheduled invocation                     |
+| `/idea id`                       | Original idea levels and append-only lifecycle history                              |
+| `/scorecard`                     | Public lifetime correct/wrong entries, separate setup/reversal results and coverage |
+| `/status`                        | Scan timestamps, instrument freshness/quality, outbox, pause and budget state       |
+| `/config channels`               | Optional overrides for six automatic destinations; optional manager role            |
+| `/config strategy`               | Validated numeric threshold changes with immutable strategy versions                |
+| `/config alerts`                 | Master alert switch, volume/reversal toggles, multiplier, and options context       |
+| `/config validation`             | Optional administrator record of historical research review                         |
+| `/pause`, `/resume`              | Pause/resume shared scans and publication within resource limits                    |
 
-All members can inspect; administrators or the configured manager role change shared lists/settings. Only administrators can grant the manager role or attest to validation. In test mode, all automatic messages go to `TEST_CHANNEL_ID`. Production requires all six destinations, permissions, historical-review attestation, and seven consecutive healthy days in test mode.
+All members can inspect; administrators or the configured manager role change shared lists/settings. Invite the bot with Administrator permission (or equivalent channel-management and publishing permissions). On the next scheduler tick or command it creates a public **Trading Bot** category with `equity-ideas`, `crypto-ideas`, `trade-updates`, `watchlist-alerts`, `daily-summaries`, and `bot-operations`, then autoassigns the six routes. Members read posts, use commands, and discuss callouts in threads. Setup resumes in bounded steps after failures and appears in `/status`, `/health`, `/debug check`, and `/config show`. `/config channels` provides optional persistent overrides. Legacy `RELEASE_MODE` and `TEST_CHANNEL_ID` values are ignored. Historical-review and seven-day-soak publication blockers are retired; permissions, pause, resource limits, credentials, account confirmation, data quality, and learning-promotion evidence checks still apply.
 
 ## Controlled learning
 
-Failure reviews explain observed failures in each callout’s thread. Detailed learning examples retain failures and exceptional successful entries; ordinary outcomes contribute aggregate counts. Weekly reports describe associations, and silent experiments test stricter filters without changing public signals. Use `/learning report`, `/learning cases`, `/learning experiments`, and manager/admin-only `/learning promote` or `/learning rollback`. Daily text-only recaps post to the summaries channel after midnight America/Phoenix, separating confirmed-entry results, setup qualifications, and reversal outcomes. They include unresolved/uncertain counts, delayed outcomes, shadow-filter tradeoffs, and dated approved learning changes. Promotion remains human-controlled and versioned. See [learning rules and validation](docs/LEARNING.md).
+Failure reviews explain observed failures in each callout’s thread. Detailed learning examples retain failures and exceptional successful entries; ordinary outcomes contribute aggregate counts. Weekly reports describe associations, and silent experiments test stricter filters without changing public signals. Use `/learning report`, `/learning cases`, `/learning experiments`, and manager/admin-only `/learning promote` or `/learning rollback`. Daily text-only recaps post to the summaries channel after midnight America/Phoenix, separating confirmed-entry results, setup qualifications, and reversal outcomes. They include unresolved/uncertain counts, delayed outcomes, shadow-filter tradeoffs, and dated approved learning changes. Promotion remains human-controlled and versioned. See [learning rules and validation](docs/LEARNING.md). Prospective scorecards now require net simulated benefit, retained winners, coverage and a finalized uncertainty check before manager promotion. Repeated same-context failures can select an earlier shadow-review path. Richer outcome diagnostics preserve the original labels; remaining proposals are recorded in the [learning roadmap](docs/LEARNING-ROADMAP.md).
 
 ## Behavior
 
+Charts default to completed 15-minute candles with daily context underneath. Daily breakout and retest markers remain on their exact daily candles in the context panel. Explicitly daily tracker alerts keep daily charts; charts fall back to daily history when no completed 15-minute bars are available. This display default does not change strategy rules or tracker timeframes.
+
 Watched symbols automatically publish qualified breakouts, daily retest readiness, and confirmed entries to their equity/crypto ideas channel. Each idea has one discussion thread; later cards stay visible in the main channel and their details are mirrored into the thread. Milestones and terminal outcomes use the updates channel. Before entry, cards and charts label the 0.5-ATR ranking reference, targets, and R/R as hypothetical; the actual retest trigger, allowed entry band, and remaining session window are separate. At entry, levels are finalized from the confirming close, which is a signal reference rather than a fill.
 
-Initial monitoring and recovery can publish one current snapshot of a still-valid pre-entry setup that has never been announced. Historical entries remain suppressed. Per-destination delivery receipts prevent successful messages from being repeated when a thread mirror fails and retries. No manual `/scan` is needed for automatic strategy alerts. Test mode retains all publishing in the configured test channel.
+Initial monitoring and recovery can publish one current snapshot of a still-valid pre-entry setup that has never been announced. Historical entries remain suppressed. Per-destination delivery receipts prevent successful messages from being repeated when a thread mirror fails and retries. No manual `/scan` is needed for automatic strategy alerts.
 
-Watchlist trackers run automatically on both daily and 15-minute candles. Volume spikes compare total volume against the preceding **10-day average** (matching session slots for intraday bars), defaulting to 2×. Cards differentiate buying, selling, and neutral pressure using close versus open, explicitly labeled as an estimate rather than measured buyer/seller volume. Reversal warnings freeze confirmed swing levels, then publish confirmation, cancellation, or expiry within five later completed candles. These alerts include annotated chart previews and use the watchlist route, preserve test-mode routing, and never create entries or change strategy levels.
+Watchlist trackers run automatically on both daily and 15-minute candles. Volume spikes compare total volume against the preceding **10-day average** (matching session slots for intraday bars), defaulting to 2×. Cards differentiate buying, selling, and neutral pressure using close versus open, explicitly labeled as an estimate rather than measured buyer/seller volume. Reversal warnings freeze confirmed swing levels, then publish confirmation, cancellation, or expiry within five later completed candles. These alerts include annotated chart previews and use the watchlist route, and never create entries or change strategy levels.
 
 Use `/config alerts enabled:true volume:true reversals:true volume_multiplier:2` to configure trackers. Both are enabled by default, including on older installations. Initial warm-up, recovery, and disabled periods advance state silently without replaying historical alerts. [Tracker rules](docs/STRATEGY.md#experimental-watchlist-trackers--watch-tracker-v1) describe the experimental reversal interpretation.
 
@@ -60,7 +63,7 @@ The journal and delivery outbox commit together. Restart replay journals old ent
 
 The implementation stops scans/publication at conservative SQLite row/request limits and falls back to text when chart rendering is unavailable. Charts are capped at 250 KiB and 60 image deliveries/day; the stricter browser reservation currently permits **at most eight render attempts/day** (six general attempts and two reserved for entries), shared with `/chart`, using eight of Cloudflare's ten free browser minutes. A failed attempt consumes its reservation. Confirm actual account-wide usage and browser closure during preflight; these counters cover this bot, not other Cloudflare workloads.
 
-Local type checks, fixtures, chart rendering, Worker bundling, and local scheduled SQLite initialization have been exercised. Cloudflare deployment, authenticated provider access, a representative cloud workload, real historical review, and the seven-day private-channel soak remain release checkpoints requiring account/server configuration. Routine publication is gated accordingly.
+Local type checks, fixtures, chart rendering, Worker bundling, and local scheduled SQLite initialization have been exercised. Actual deployed connectivity, permissions, resource use and card/thread behavior still need operational observation. Local checks do not establish those facts. Live publication no longer requires a private-channel soak or historical attestation.
 
 `npm audit` currently reports upstream high-severity findings in the Cloudflare Puppeteer package's Node browser-download dependency chain (`extract-zip` and proxy/FTP dependencies). Those modules are absent from the generated Worker bundle; this app never downloads or extracts browser archives through Puppeteer. Review the upstream advisory before changing that usage. Do not downgrade to the obsolete version suggested by `npm audit fix --force`.
 
@@ -68,7 +71,7 @@ The strategy is experimental. Reference prices, target touches, and planned rewa
 
 `/watch add` offers searchable symbol quick picks for common stocks, ETFs and Coinbase USD pairs. Choose the market first to filter the dropdown, then pick a symbol or type a custom one. Suggestions are examples; normal provider, strategy, data-quality and pin-limit checks still apply. Command definitions update automatically after deployment; no reinvite is needed.
 
-Use `/debug check` (optionally `symbol:BTC-USD`) for an ephemeral JSON attachment showing alert toggles, data freshness, tracker cursors, cached volume/baseline measurements, pending reversals, provider cooldowns, channel permissions and resource budgets. It does not fetch provider data or send alerts. `/debug test` is restricted to administrators/managers and sends a clearly labeled synthetic volume card with an annotated chart to `TEST_CHANNEL_ID` only. It tests publishing and rendering even during provider outages, uses normal resource limits and receipts, and leaves real ideas, tracker cursors and cooldowns untouched. If charts are unavailable, the reply explicitly reports text-only delivery. No synthetic events are queued for normal-channel publishing. Commands sync automatically after deployment.
+Use `/debug check` (optionally `symbol:BTC-USD`) for an ephemeral diagnostic attachment showing alert switches, data freshness, tracker cursors, cached measurements, pending reversals, provider cooldowns, automatic channel setup, permissions, scorecard coverage and resource budgets. It does not fetch provider data or send alerts. `/debug test` and private news smoke requests have been retired; offline preview and smoke scripts remain available. Commands sync automatically after deployment.
 
 ## Public bot and watchlist updates
 
@@ -76,7 +79,7 @@ Major releases post their changelog and added/changed/removed commands once to t
 
 Manual pins, removals, restorations, and changed automatic selections post to the **watchlist** channel. Each update shows the full current manual/automatic list, additions/removals, persistent exclusions, and symbols still monitored for active ideas. Unchanged selections and no-op commands do not announce again. Restoration makes a symbol eligible; it does not immediately pin or select it.
 
-In test mode both announcement types use `TEST_CHANNEL_ID`. Existing publication permissions, production release checks, resource limits and pause controls apply. Announcements use durable delivery receipts, never charts, and large lists attach their complete text. Signal events retain queue priority.
+Release announcements use `bot-operations`; full-list watchlist changes use `watchlist-alerts`. Channel permissions, resource limits and pause controls apply. Announcements use durable delivery receipts, never charts, and large lists attach their complete text. Signal events retain queue priority.
 
 ### Candle range expansion
 
@@ -84,12 +87,26 @@ Watched and active-idea symbols receive daily and 15-minute range alerts when a 
 
 Use `/config alerts enabled:true range:true range_multiplier:3` (range multiplier 1–10). Existing settings default to enabled under the master switch. Matching enabled volume and range spikes combine into one card with a four-hour cooldown for each tracker and candle direction. A discussion thread holds exact range, body and volume measurements. Charts mark the triggering candle; chart failure or allowance exhaustion leaves text delivery available. Warm-up, recovery and re-enabling never replay old alerts.
 
-`/debug check` reports cached range measurements and threshold eligibility. `/debug test tracker:range` and `/debug test tracker:combined` deliver labeled synthetic examples to `TEST_CHANNEL_ID` without changing live tracker state. Run both in the private test channel and inspect the card and marked candle before normal-channel release. Local layout previews: `node --import tsx scripts/preview-range.ts`.
+`/debug check` reports cached range measurements and threshold eligibility. Local synthetic layout previews remain available through `node --import tsx scripts/preview-range.ts`; synthetic samples are not routed into public channels.
 
 ## Releases 1–3
 
 The three-stage [implementation plan](docs/IMPROVEMENT-PLAN.md) and [command/rollout guide](docs/RELEASES-1-3.md) cover correctness, efficiency and decision support. Use `/health`, `/explain`, `/ideas active`, `/digest`, `/stats`, `/context` and `/config show` for readable summaries with detailed attachments. Personal `/follow` preferences filter `/digest personal:true`; they do not modify shared monitoring or send unsolicited DMs. Managers inspect and retry failed deliveries through `/queue`.
 
-Discovery advances separately between monitor polls. Provider jobs launch at most 24 requests over a 25-second work window, retain per-product progress and download intraday history only when a completed slot is due. Identical frozen charts use a bounded process-local cache. Existing published production calls retain lifecycle continuity while new versions await validation; pause, quota and destination permissions still apply. Delayed/obsolete entries are labeled historical.
+Discovery advances separately between monitor polls. Provider jobs launch at most 24 requests over a 25-second work window, retain per-product progress and download intraday history only when a completed slot is due. Identical frozen charts use a bounded process-local cache. Existing published calls retain lifecycle continuity across rule changes; pause, quota and destination permissions still apply. Delayed/obsolete entries are labeled historical.
 
 Replay records exact strategy configuration and normalized input hashes; historical evidence requires a source manifest and administrator review. `npm run simulate -- /absolute/path/input.json` adds a separate offline next-bar execution model with costs, conservative stop/target ambiguity and chronological holdout reporting. It does not place orders or establish profitability.
+
+## Threshold exit-review indicator
+
+The optional [Threshold Indicator](docs/THRESHOLD.md) flags four market hours without volatility-sized favorable progress. It supports automatic confirmed-idea monitoring and member-registered standard long equity/ETF options, with breakeven, any profit, or a bounded small loss above an entered stop. It prompts a review without placing orders or changing strategy exits.
+
+All threshold switches default **off**. Managers configure `/threshold config`; members use `/threshold add`, `edit`, `list`, `show`, `snooze`, and `stop`. Alerts publish to the shared updates route, disclose registered trade details, use explicitly labeled indicative estimated P&L, and consume no chart/browser resources. See the guide for formulas, ownership, fees/stops, delayed market clocks, quote checks and rollout validation.
+
+## Lifetime public scorecard
+
+Anyone can run `/scorecard` to post totals publicly in the channel where it is invoked. Confirmed entries lead with **correct/wrong** totals; setups and reversals have independent qualified/failed and confirmed/cancelled totals. Pending, unconfirmed, ambiguous and unknown calls remain separate. Final targets and nonnegative directional time exits are correct; invalidations and negative time exits are wrong. Partial targets do not count as additional calls. These are signal-reference outcomes, not realized returns.
+
+A durable projection counts each idea once per family and requires a receipt for an originating real callout. It includes real retained calls from the former test channel, across all versions and markets. Synthetic/debug calls, silent replay/recovery samples, volume/range alerts, news and threshold prompts are excluded. Backfill runs in bounded scheduler batches independently of model training; reports disclose partial totals, processing times and historical gaps. Delayed receipts become eligible without duplicate results. Daily recaps, restarts, deployments and detailed-learning retention never reset lifetime totals.
+
+Existing Discord messages and receipts remain historical records. Active legacy discussions receive a labeled public continuation thread on their next update. Routing changes never replay an old entry as a new actionable call. News and threshold switches remain off by default; news still requires licensed sources, current health and its separate manager review.

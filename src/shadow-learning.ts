@@ -4,6 +4,7 @@ import type { Family } from './learning.js';
 import type { Store } from './sql-store.js';
 import { stableId, strategyVersion } from './core/strategy.js';
 import { currentReversal } from './reversal-config.js';
+import { LearningEvaluations } from './learning-evaluation.js';
 
 const DAY = 86_400_000;
 const dayOf = (time: number) => new Date(time - 7 * 3_600_000).toISOString().slice(0, 10);
@@ -12,6 +13,8 @@ export interface ShadowScore {
   modelId: string;
   score: number;
   retain: boolean;
+  baseline?: number;
+  evaluationId?: string;
 }
 export interface OutcomeSample {
   id: string;
@@ -31,6 +34,8 @@ interface Model {
   cutoff: number;
   weights: number[];
   trainCount: number;
+  baseline?: number;
+  evaluationId?: string;
   validation: {
     count: number;
     brier: number;
@@ -96,7 +101,17 @@ export class ShadowLearning {
     // Backfilled calls never receive a prediction made using later information.
     if (!model || model.trainedAt >= e.marketTime || model.trainedAt > e.recordedAt) return;
     const score = predict(model.weights, vector(e, e.learning));
-    return { modelId: model.id, score, retain: score >= 0.5 };
+    const evaluation = model.evaluationId
+      ? new LearningEvaluations(this.store).get(model.evaluationId)
+      : undefined;
+    if (evaluation && e.marketTime >= evaluation.endsAt) return;
+    return {
+      modelId: model.id,
+      score,
+      retain: score >= 0.5,
+      baseline: model.baseline,
+      evaluationId: model.evaluationId,
+    };
   }
   record(sample: OutcomeSample) {
     this.store.db
@@ -198,13 +213,29 @@ export class ShadowLearning {
             cutoff,
             weights,
             trainCount: train.length,
+            baseline,
             validation,
           };
           // The deployed shadow candidate is exactly the model evaluated on the untouched holdout.
           this.store.db
             .prepare('INSERT INTO learning_models(id,day,body) VALUES(?,?,?)')
             .run(model.id, day, JSON.stringify(model));
-          this.store.set(`shadow_model:${key}`, model);
+          const current = this.store.get<Model | null>(`shadow_model:${key}`, null);
+          // Research snapshots keep training daily; evaluation candidates never change mid-window.
+          if (
+            !current?.evaluationId ||
+            new LearningEvaluations(this.store).inspect(current.evaluationId)?.finalized
+          ) {
+            model.evaluationId = new LearningEvaluations(this.store).create(
+              model.id,
+              family,
+              version,
+              'model',
+              { key, modelId: model.id, baseline, threshold: 0.5 },
+              now,
+            ).id;
+            this.store.set(`shadow_model:${key}`, model);
+          }
           reports.push(
             `${key}: ${model.id}; trained on ${train.length}, validated on ${test.length}. Brier ${validation.brier.toFixed(3)} vs constant baseline ${validation.baselineBrier.toFixed(3)} (lower is better); would exclude ${validation.avoidedFailures} failures and ${validation.excludedSuccesses} successes, retain ${validation.retained}. Offline holdout evidence only.`,
           );

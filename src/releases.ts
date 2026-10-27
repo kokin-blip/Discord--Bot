@@ -125,6 +125,39 @@ export const releases: readonly BotRelease[] = [
     removedCommands: [],
   },
   {
+    id: '2026-10-09-news-intelligence-publication',
+    title: 'Licensed informational news',
+    changes: [
+      'Optional cached news, explainable financial sentiment and reviewed sources; news never changes trading signals or learning promotions.',
+      'Permission-gated daily Phoenix digests and bounded severe-event alerts use existing receipts and outbox, with all test-mode output routed to the private test channel.',
+      'News is disabled by default. Source rights, credentials and a separate private-test soak and rollout review are required before production news.',
+    ],
+    addedCommands: [
+      '/news latest [symbol]',
+      '/news sentiment [symbol]',
+      '/news sources',
+      '/news status',
+      '/news config enabled/marketaux/currents/gdelt/digest/alerts and reduced daily caps',
+    ],
+    changedCommands: [],
+    removedCommands: [],
+  },
+  {
+    id: '2026-10-09-news-validation-and-rollout',
+    title: 'News validation and rollout review',
+    changes: [
+      'Private-test news diagnostics now track ingestion, duplicates, policy suppression, freshness, delivery failures and resource use.',
+      'Explicit smoke checks share persistent provider quotas; uncertain attempts are never retried as smoke checks.',
+      'Production news requires seven continuous healthy private-test days with live ingestion and delivery evidence, plus a manager review of accuracy and free-plan headroom. Offline fixtures cannot clear this gate.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/news status smoke:<boolean>: optionally queue bounded private-test checks; attach monitoring and review snapshot.',
+      '/news config review_sha256/reviewed_mappings/false_mappings/reviewed_alerts/false_alerts/free_plan_verified: record a separate human rollout review.',
+    ],
+    removedCommands: [],
+  },
+  {
     id: '2026-10-11-daily-shadow-model',
     title: 'Daily learning journal and shadow model',
     changes: [
@@ -138,6 +171,78 @@ export const releases: readonly BotRelease[] = [
       '/status: shadow learning diagnostics.',
     ],
     removedCommands: [],
+  },
+  {
+    id: '2026-10-20-threshold-exit-review',
+    title: 'Threshold indicator: stalled-trade exit reviews',
+    changes: [
+      'Optional four-market-hour stagnation reviews track confirmed ideas and member-registered standard long options, with frozen-ATR progress checkpoints and underlying range-contraction context.',
+      'Breakeven, any profit, and bounded small losses above an entered stop can qualify; contract P&L uses explicitly labeled modified indicative quotes and entered fees, never executable or realized returns.',
+      'Owner-controlled monitors, one alert per stall, one-hour snooze reminders, durable delivery receipts and forward observations use the updates route without charts. All threshold switches default off; no orders are placed.',
+    ],
+    addedCommands: [
+      '/threshold add contract entry [quantity] [stop] [fees] [idea]',
+      '/threshold edit id [entry] [quantity] [stop] [clear_stop] [fees]',
+      '/threshold list',
+      '/threshold show id',
+      '/threshold snooze id',
+      '/threshold stop id',
+      '/threshold config [enabled] [ideas] [contracts] [hours] [progress_atr] [contract_loss_percent] [idea_loss_r]',
+    ],
+    changedCommands: [
+      '/config show, /status, /health, /debug check: cached threshold settings, monitor eligibility, freshness, deferred work and errors.',
+      '/watch list: includes symbols retained for active threshold contracts; watchlist announcements identify retained monitoring.',
+    ],
+    removedCommands: [],
+  },
+  {
+    id: '2026-10-20-prospective-learning-scorecards',
+    title: 'Prospective improvement scorecards and evidence-gated promotion',
+    changes: [
+      'Immutable prospective evaluations compare retained calls and missed winners, with cached-candle simulation, frozen costs, cohort checks and day-block uncertainty bounds.',
+      'Recurring failure patterns permit faster shadow discovery and earlier evidence review; neither losses nor elapsed time can activate a filter automatically.',
+      'Daily model research continues separately from frozen shadow evaluation candidates. Existing experiments need fresh evidence before manager-approved promotion.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/learning report, /learning experiments: prospective scorecards, simulation coverage, evidence tiers and readiness blockers.',
+      '/learning promote: enforce finalized benefit, coverage and retention requirements before manager-approved rule changes.',
+      '/status: fixed-filter and predictive-model evaluation diagnostics.',
+    ],
+    removedCommands: [],
+  },
+  {
+    id: '2026-10-20-richer-learning-outcomes',
+    title: 'Richer outcome diagnostics for shadow learning',
+    changes: [
+      'Immutable outcome diagnostics track completed-candle favorable/adverse excursions, time to extremes, terminal reasons and observation coverage without changing original outcome labels.',
+      'Immediate invalidation, insufficient follow-through, favorable movement then reversal and near-chase-limit tags describe observed behavior; missing data and unknown candle ordering remain explicit.',
+      'Diagnostic and simulated-execution cursors survive restarts and retain frozen source rules. Learning remains shadow-only unless a fixed filter passes evidence checks and receives manager approval.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/learning cases, /learning report: outcome diagnostics and coverage summaries alongside original results.',
+      '/status: outcome-diagnostic availability; failure reviews and daily recap text include diagnostic summaries.',
+    ],
+    removedCommands: [],
+  },
+  {
+    id: '2026-10-27-lifetime-scorecard-and-live-channels',
+    title: 'Lifetime callout scorecard and automatic public channels',
+    changes: [
+      'Public lifetime correct/wrong entry totals include retained delivered history, with separate setup and reversal results and explicit uncertain outcomes and coverage.',
+      'Automatically creates six public bot-post channels under Trading Bot; members use commands and discussion threads, and explicit channel overrides remain available.',
+      'Live publication replaces private-test routing and historical-review/seven-day-soak blockers. Pause, permissions, data quality, resource limits, source rights and learning promotion review remain enforced.',
+      'Historical messages and delivery receipts are preserved; legacy discussions continue in labeled public threads without replaying old entry signals.',
+    ],
+    addedCommands: ['/scorecard'],
+    changedCommands: [
+      '/config channels: optional overrides for automatically managed destinations.',
+      '/config validation: optional historical research evidence, no publication gate.',
+      '/status, /health, /debug check, /config show: live channel setup and scorecard coverage diagnostics.',
+      '/news status: private-test smoke option removed; /news config: current live health and separate manager review without a private soak.',
+    ],
+    removedCommands: ['/debug test'],
   },
 ];
 export const currentRelease = releases.at(-1)!;

@@ -1,3 +1,6 @@
+import { initializeThresholdSchema } from './threshold/store.js';
+import { initializeLearningSchema } from './learning-schema.js';
+import { initializeScorecardSchema } from './scorecard.js';
 import { watchlistChanged } from './announcements.js';
 import type { Bar, Idea, Instrument, SignalEvent } from './domain.js';
 import { terminalStates } from './domain.js';
@@ -11,6 +14,7 @@ import {
 } from './config.js';
 import { strategyVersion } from './core/strategy.js';
 import { currentReversal, saveReversal } from './reversal-config.js';
+import { historyChanged } from './core/quality.js';
 type Row = Record<string, string | number | null>;
 export interface SqlDatabase {
   mode?: string;
@@ -60,6 +64,9 @@ export class Store {
       CREATE INDEX IF NOT EXISTS learning_activity_day ON learning_activity(day);
       CREATE TABLE IF NOT EXISTS strategy_versions(version TEXT PRIMARY KEY,body TEXT NOT NULL);
       ${this.db.mode === 'cloud' ? '' : 'PRAGMA user_version=1;'} `);
+    initializeThresholdSchema(this.db);
+    initializeLearningSchema(this.db);
+    initializeScorecardSchema(this.db);
     this.saveStrategy(this.strategy());
     saveReversal(this, currentReversal(this).config);
   }
@@ -156,7 +163,7 @@ export class Store {
       watchlistChanged(
         this,
         before,
-        `Removed and excluded from automatic selection: ${i.symbol}. Active ideas remain monitored.`,
+        `Removed and excluded from automatic selection: ${i.symbol}. Active ideas and registered threshold contracts remain monitored.`,
       );
     });
   }
@@ -183,7 +190,7 @@ export class Store {
       watchlistChanged(this, before, 'Automatic discovery updated the selected watchlist.');
     });
   }
-  monitored(): Instrument[] {
+  baseMonitored(): Instrument[] {
     const selected = this.watchRows()
       .filter((r) => !r.excluded && (r.auto || r.pinned))
       .map((r) => r.instrument);
@@ -196,9 +203,22 @@ export class Store {
       ).values(),
     ];
   }
+  monitored(): Instrument[] {
+    const retained = (
+      this.db
+        .prepare("SELECT body FROM threshold_monitors WHERE status='active' AND mode='contract'")
+        .all() as { body: string }[]
+    ).map((r) => (JSON.parse(r.body) as { instrument: Instrument }).instrument);
+    return [...new Map([...this.baseMonitored(), ...retained].map((i) => [i.id, i])).values()];
+  }
   cache(i: Instrument, interval: string, bars: Bar[]) {
+    const cached = this.bars(i, interval);
+    if (historyChanged(cached, bars)) {
+      const key = `learning_history_revision:${i.id}`;
+      this.set(key, this.get(key, 0) + 1);
+    }
     if (this.db.mode === 'cloud') {
-      const merged = new Map(this.bars(i, interval).map((b) => [b.start, b]));
+      const merged = new Map(cached.map((b) => [b.start, b]));
       for (const b of bars) merged.set(b.start, b);
       const sorted = [...merged.values()].sort((a, b) => a.start - b.start);
       const recent = sorted.filter(
@@ -310,7 +330,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? AND (?=0 OR EXISTS (SELECT 1 FROM meta m WHERE m.key='production_idea:' || e.idea_id AND json_extract(m.value,'$')=json_extract(e.body,'$.strategyVersion'))) ORDER BY CASE WHEN json_extract(e.body,'$.strategyVersion') LIKE 'br-v1-%' THEN 0 WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report','announcement') THEN 2 ELSE 1 END,e.seq LIMIT 25",
+          "SELECT e.body,o.route,o.attempts FROM outbox o JOIN events e ON e.id=o.event_id WHERE status='pending' AND next_attempt<=? AND (?=0 OR EXISTS (SELECT 1 FROM meta m WHERE m.key='production_idea:' || e.idea_id AND json_extract(m.value,'$')=json_extract(e.body,'$.strategyVersion'))) ORDER BY CASE WHEN json_extract(e.body,'$.kind')='news_report' THEN 4 WHEN json_extract(e.body,'$.kind')='threshold_alert' THEN 3 WHEN json_extract(e.body,'$.strategyVersion') LIKE 'br-v1-%' THEN 0 WHEN json_extract(e.body,'$.kind') IN ('learning_review','learning_report','announcement') THEN 2 ELSE 1 END,e.seq LIMIT 25",
         )
         .all(now, continuingOnly ? 1 : 0) as Row[]
     ).map((r) => ({
@@ -368,6 +388,11 @@ export class Store {
       .get(eventId, destination) as Row | undefined;
     return row ? String(row.message_id) : undefined;
   }
+  hasReceipt(eventId: string): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM delivery_receipts WHERE event_id=? LIMIT 1')
+      .get(eventId);
+  }
   saveReceipt(eventId: string, destination: string, messageId: string) {
     this.db
       .prepare('INSERT OR IGNORE INTO delivery_receipts VALUES(?,?,?)')
@@ -402,6 +427,19 @@ export class Store {
         'INSERT INTO threads VALUES(?,?,?,?) ON CONFLICT(idea_id) DO UPDATE SET thread_id=COALESCE(excluded.thread_id,threads.thread_id)',
       )
       .run(id, channel, message, thread ?? null);
+  }
+  rehomeThread(id: string, channel: string, message: string, thread?: string) {
+    this.transaction(() => {
+      const previous = this.thread(id);
+      if (previous && previous.channel !== channel)
+        this.set(`historical_thread:${id}:${previous.message}`, previous);
+      this.db
+        .prepare(
+          `INSERT INTO threads VALUES(?,?,?,?) ON CONFLICT(idea_id) DO UPDATE SET
+        channel_id=excluded.channel_id,message_id=excluded.message_id,thread_id=excluded.thread_id`,
+        )
+        .run(id, channel, message, thread ?? null);
+    });
   }
   markCooldown(key: string, time: number): void {
     this.db

@@ -1,3 +1,4 @@
+import { configuredChannels, reviewedNews } from './live-fixtures.js';
 import { expect, it, vi } from 'vitest';
 import { Store } from '../src/storage.js';
 import { fixture, idea } from './fixtures.js';
@@ -196,6 +197,7 @@ it('delivers an existing production exit even when unrelated routes and new-vers
       },
       publisher: { validate: async () => ({}), deliver },
     });
+    configuredChannels(coordinator, { updates: 'updates' });
     const response = await coordinator.fetch(new Request('https://internal/tick'));
     expect(response.ok).toBe(true);
     expect(deliver).toHaveBeenCalledWith(exit, 'updates');

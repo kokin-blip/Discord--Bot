@@ -1,5 +1,7 @@
 # Releases 1–3: operation and rollout
 
+> Historical release document. The 2026-10-27 live-channel update supersedes private test routing, mandatory soak/historical-attestation publication gates, and manual destination setup. See [current setup](CLOUDFLARE.md) and [lifetime scorecard](../README.md#lifetime-public-scorecard).
+
 The [implementation plan](IMPROVEMENT-PLAN.md) defines the three stages and acceptance checks. Each stage has an immutable record in `src/releases.ts`. A deployment queues only the latest release announcement through the ordinary outbox; it does not replay earlier releases or send manual release messages.
 
 ## Member commands

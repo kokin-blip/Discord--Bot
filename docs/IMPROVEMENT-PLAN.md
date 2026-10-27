@@ -1,5 +1,7 @@
 # Three-release implementation plan
 
+> Historical release document. The 2026-10-27 live-channel update supersedes private test routing, mandatory soak/historical-attestation publication gates, and manual destination setup. See [current setup](CLOUDFLARE.md) and [lifetime scorecard](../README.md#lifetime-public-scorecard).
+
 Scope: implement and validate locally in dependency order. Deployment and the real historical review/private-channel soak remain separate operational checkpoints. Preserve signal-only behavior, immutable journals and releases, atomic full-list watchlist announcements, persistent exclusions, no-op deduplication, test routing, receipts, and text delivery without charts.
 
 ## Release 1 — correctness and continuity

@@ -7,9 +7,12 @@ export interface Env {
   DISCORD_PUBLIC_KEY: string;
   DISCORD_APPLICATION_ID: string;
   DISCORD_GUILD_ID: string;
+  MARKETAUX_API_TOKEN?: string;
+  CURRENTS_API_KEY?: string;
   ALPACA_API_KEY: string;
   ALPACA_API_SECRET: string;
-  TEST_CHANNEL_ID: string;
-  RELEASE_MODE: 'test' | 'production';
+  /** Legacy deployment variables are ignored by live routing. */
+  TEST_CHANNEL_ID?: string;
+  RELEASE_MODE?: 'test' | 'production';
   FREE_PLAN_CONFIRMED: string;
 }

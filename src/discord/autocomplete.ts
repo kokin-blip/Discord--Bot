@@ -52,6 +52,7 @@ export function cachedSuggestions(
   request: AutocompleteRequest,
   symbols: string[],
   ideas: { id: string; symbol: string; state: string }[],
+  monitors: { id: string; symbol: string; status: string }[] = [],
 ): { name: string; value: string }[] {
   const findFocused = (rows: AutocompleteOption[]): AutocompleteOption | undefined => {
     for (const row of rows) {
@@ -65,13 +66,21 @@ export function cachedSuggestions(
   const query = String(focused?.value ?? '')
     .trim()
     .toUpperCase();
-  if (request.data?.name === 'idea' && focused?.name === 'id')
+  if (request.data?.name === 'threshold' && focused?.name === 'id')
+    return monitors
+      .filter((m) => m.id.toUpperCase().startsWith(query) || m.symbol.includes(query))
+      .slice(0, 25)
+      .map((m) => ({ name: `${m.symbol} · ${m.status} · ${m.id}`.slice(0, 100), value: m.id }));
+  if (
+    (request.data?.name === 'idea' && focused?.name === 'id') ||
+    (request.data?.name === 'threshold' && focused?.name === 'idea')
+  )
     return ideas
       .filter((i) => i.id.toUpperCase().startsWith(query) || i.symbol.startsWith(query))
       .slice(0, 25)
       .map((i) => ({ name: `${i.symbol} · ${i.state} · ${i.id}`.slice(0, 100), value: i.id }));
   if (
-    !['chart', 'explain', 'context', 'follow'].includes(request.data?.name ?? '') ||
+    !['chart', 'explain', 'context', 'follow', 'news'].includes(request.data?.name ?? '') ||
     focused?.name !== 'symbol'
   )
     return [];

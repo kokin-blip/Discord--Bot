@@ -1,3 +1,4 @@
+import { ThresholdStore } from '../threshold/store.js';
 import type { Dataset, SignalEvent } from '../domain.js';
 import { crypto } from '../domain.js';
 import type { Store } from '../sql-store.js';
@@ -15,7 +16,7 @@ export function debugReport(
   store: Store,
   now: number,
   runtimeVersion: string,
-  testChannel?: string,
+  _legacyTestChannel?: string,
   symbol?: string,
 ) {
   const settings = store.settings();
@@ -25,6 +26,7 @@ export function debugReport(
   const calendar = store.get<{ rows: Dataset['sessions'] }>('calendar', { rows: [] });
   return {
     runtimeVersion,
+    threshold: new ThresholdStore(store).status(),
     checkedAt: new Date(now).toISOString(),
     paused: settings.paused,
     alerts: {
@@ -41,7 +43,7 @@ export function debugReport(
     lastError: store.get('last_error', null),
     discoveryError: store.get('discovery_error', null),
     coinbaseRetryAt: store.get('retry_after:api.exchange.coinbase.com', 0),
-    testChannel: testChannel ?? null,
+    channelSetup: store.get('channel_setup_status', { state: 'pending' }),
     watchlistChannel: settings.channels.watchlist ?? null,
     pendingDeliveries: store.pendingCount(),
     lastTest: store.get('debug_last_delivery', null),
