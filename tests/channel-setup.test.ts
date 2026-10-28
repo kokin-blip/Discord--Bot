@@ -27,7 +27,7 @@ function fixture() {
   };
   return { store, inventory, rest, setup, complete };
 }
-it('creates six public bot-post channels in bounded resumable steps and autoassigns routes', async () => {
+it('creates seven public bot-post channels in bounded resumable steps and autoassigns routes', async () => {
   const f = fixture();
   try {
     for (let n = 0; n < 4; n++) {
@@ -35,7 +35,7 @@ it('creates six public bot-post channels in bounded resumable steps and autoassi
       await f.setup.ensure('bot');
       expect(f.rest.post.mock.calls.length - previous).toBeLessThanOrEqual(2);
     }
-    expect(f.inventory).toHaveLength(7);
+    expect(f.inventory).toHaveLength(8);
     expect(f.inventory[0]).toMatchObject({ name: 'Trading Bot', type: ChannelType.GuildCategory });
     for (const route of routes) {
       const channel = f.inventory.find((c) => c.id === f.store.settings().channels[route]);
@@ -49,7 +49,7 @@ it('creates six public bot-post channels in bounded resumable steps and autoassi
     const writes = vi.spyOn(f.store, 'set');
     await new ChannelSetup(f.store, { rest: f.rest } as never, 'guild').ensure('bot');
     expect(writes).not.toHaveBeenCalled();
-    expect(f.inventory).toHaveLength(7);
+    expect(f.inventory).toHaveLength(8);
   } finally {
     f.store.close();
   }
@@ -65,7 +65,7 @@ it('serializes concurrent setup and recovers a create accepted by Discord before
     await Promise.all([f.setup.ensure('bot'), f.setup.ensure('bot')]);
     expect(f.inventory).toHaveLength(1);
     await f.complete();
-    expect(f.inventory).toHaveLength(7);
+    expect(f.inventory).toHaveLength(8);
     expect(f.inventory.filter((c) => c.type === ChannelType.GuildCategory)).toHaveLength(1);
   } finally {
     f.store.close();
@@ -87,7 +87,7 @@ it('recreates deleted managed channels while preserving explicit administrator o
     await f.setup.ensure('bot');
     expect(f.store.settings().channels.updates).not.toBe(old);
     expect(f.store.settings().channels.summaries).toBe('custom');
-    expect(f.rest.post).toHaveBeenCalledTimes(8);
+    expect(f.rest.post).toHaveBeenCalledTimes(9);
   } finally {
     f.store.close();
   }
@@ -104,7 +104,40 @@ it('retains successful steps after permission failures and exposes sanitized dia
     expect(JSON.stringify(status)).not.toContain('secret-token');
     expect(f.store.get('managed_channels', {})).toMatchObject({ categoryId: '1' });
     await f.complete();
-    expect(f.inventory).toHaveLength(7);
+    expect(f.inventory).toHaveLength(8);
+  } finally {
+    f.store.close();
+  }
+});
+it('adds entries to an existing six-channel installation without replacing its channels or overrides', async () => {
+  const f = fixture();
+  try {
+    await f.complete();
+    const settings = f.store.settings();
+    const previous = { ...settings.channels };
+    const state = f.store.get<{ channels: Record<string, string> }>('managed_channels', {
+      channels: {},
+    });
+    f.inventory.splice(
+      f.inventory.findIndex((c) => c.id === settings.channels.entries),
+      1,
+    );
+    delete settings.channels.entries;
+    delete previous.entries;
+    delete state.channels.entries;
+    settings.channels.summaries = 'custom';
+    previous.summaries = 'custom';
+    f.store.set('settings', settings);
+    f.store.set('managed_channels', state);
+    f.store.set('managed_channel_overrides', { summaries: 'custom' });
+    f.rest.post.mockClear();
+    await f.setup.ensure('bot');
+    expect(f.rest.post).toHaveBeenCalledTimes(1);
+    expect(f.rest.post.mock.calls[0]![1].body).toMatchObject({ name: 'entries', parent_id: '1' });
+    expect(f.store.settings().channels).toMatchObject(previous);
+    expect(f.store.settings().channels.entries).toBeDefined();
+    await f.setup.ensure('bot');
+    expect(f.rest.post).toHaveBeenCalledTimes(1);
   } finally {
     f.store.close();
   }

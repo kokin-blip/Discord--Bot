@@ -293,11 +293,14 @@ export class Store {
           .run(e.id, e.ideaId, JSON.stringify(e)).changes;
         if (changed && publish && !e.recovery) {
           const route: Route =
-            e.state === 'watching' || e.state === 'setup_ready' || e.state === 'entry_triggered'
-              ? e.instrument.market === 'equity'
-                ? 'equity_ideas'
-                : 'crypto_ideas'
-              : 'updates';
+            e.state === 'entry_triggered' &&
+            (e.kind === 'lifecycle' || (!e.kind && e.strategyVersion.startsWith('br-v1-')))
+              ? 'entries'
+              : e.state === 'watching' || e.state === 'setup_ready'
+                ? e.instrument.market === 'equity'
+                  ? 'equity_ideas'
+                  : 'crypto_ideas'
+                : 'updates';
           this.db
             .prepare('INSERT OR IGNORE INTO outbox(event_id,route) VALUES(?,?)')
             .run(e.id, route);
@@ -321,6 +324,26 @@ export class Store {
     this.transaction(() => {
       this.recordEvent(e);
       this.db.prepare('INSERT OR IGNORE INTO outbox(event_id,route) VALUES(?,?)').run(e.id, route);
+    });
+  }
+  /** Move only unsent legacy entries; receipted deliveries must finish in their original route. */
+  migrateEntryRoutes() {
+    if (this.get('entries_routing_v1', false)) return;
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE outbox SET route='entries'
+        WHERE status IN ('pending','dead') AND route IN ('equity_ideas','crypto_ideas')
+        AND NOT EXISTS(SELECT 1 FROM delivery_receipts r WHERE r.event_id=outbox.event_id)
+        AND EXISTS(SELECT 1 FROM events e WHERE e.id=outbox.event_id
+          AND json_extract(e.body,'$.state')='entry_triggered'
+          AND COALESCE(json_extract(e.body,'$.debug'),0)=0
+          AND COALESCE(json_extract(e.body,'$.recovery'),0)=0
+          AND (json_extract(e.body,'$.kind')='lifecycle' OR
+            (json_extract(e.body,'$.kind') IS NULL AND json_extract(e.body,'$.strategyVersion') LIKE 'br-v1-%')))`,
+        )
+        .run();
+      this.set('entries_routing_v1', true);
     });
   }
   pending(

@@ -49,6 +49,7 @@ function harness(store: Store) {
     return channel;
   };
   const main = makeChannel('main'),
+    entries = makeChannel('entries'),
     updates = makeChannel('updates'),
     thread = makeChannel('thread', true);
   const charts = { render: vi.fn(async () => Buffer.from('chart')) };
@@ -66,7 +67,7 @@ function harness(store: Store) {
     'guild',
     () => fixture().provenance.asOf,
   );
-  return { main, updates, thread, charts, publisher, makeChannel };
+  return { main, entries, updates, thread, charts, publisher, makeChannel };
 }
 function events(direction: 'bullish' | 'bearish' = 'bullish') {
   const data = fixture(direction),
@@ -86,6 +87,34 @@ function events(direction: 'bullish' | 'bearish' = 'bullish') {
     advanced: advance(original, data, defaults, data.provenance.asOf),
   };
 }
+it('posts confirmed entries only in entries and retains the original setup discussion on retries', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      e = events();
+    store.saveIdea(e.advanced.idea, [e.watching, ...e.advanced.events]);
+    const destinations = { equity_ideas: 'main', crypto_ideas: 'main', entries: 'entries' };
+    for (const pending of store.pending(e.data.provenance.asOf))
+      await h.publisher.deliver(
+        pending.event,
+        destinations[pending.route as keyof typeof destinations],
+      );
+    const entry = e.advanced.events.find((event) => event.state === 'entry_triggered')!;
+    expect(h.main.send).toHaveBeenCalledTimes(2);
+    expect(h.entries.send).toHaveBeenCalledTimes(1);
+    expect(h.entries.send.mock.calls[0][0].embeds[0].toJSON().title).toContain('BUY IN NOW');
+    expect(store.thread(entry.ideaId)).toMatchObject({ channel: 'main', thread: 'thread' });
+    expect(store.receipt(entry.id, 'entries')).toBeDefined();
+    expect(store.receipt(entry.id, 'thread')).toBeDefined();
+    expect(store.receipt(entry.id, 'main')).toBeUndefined();
+    await h.publisher.deliver(entry, 'entries');
+    expect(h.entries.send).toHaveBeenCalledTimes(1);
+    expect(h.thread.send).toHaveBeenCalledTimes(2);
+    expect(h.updates.send).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});
 it('rehomes legacy private discussion into labeled public context without replaying an entry', async () => {
   const store = new Store(':memory:');
   try {

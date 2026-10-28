@@ -21,6 +21,11 @@ it('syncs global server commands once, including tracker controls, and retries a
     const alerts = body
       .find((c) => c.name === 'config')
       .options.find((s: any) => s.name === 'alerts');
+    const channelRoute = body
+      .find((c) => c.name === 'config')
+      .options.find((s: any) => s.name === 'channels')
+      .options.find((o: any) => o.name === 'route');
+    expect(channelRoute.choices).toContainEqual({ name: 'entries', value: 'entries' });
     expect(alerts.options.map((o: any) => o.name)).toEqual([
       'enabled',
       'options',

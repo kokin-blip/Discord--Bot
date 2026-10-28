@@ -76,7 +76,7 @@ it('provisions live routes on scheduled ticks, registers scorecard, and publishe
       expect((await f.c.fetch(new Request('https://internal/tick'))).ok).toBe(true);
       expect(f.create.mock.calls.length - before).toBeLessThanOrEqual(2);
     }
-    expect(f.inventory).toHaveLength(7);
+    expect(f.inventory).toHaveLength(8);
     expect(routes.every((r) => !!f.c.store.settings().channels[r])).toBe(true);
     expect(f.c.store.get('channel_setup_status', {})).toMatchObject({ state: 'ready' });
     expect(f.c.store.get('command_registration_details', {})).toMatchObject({
@@ -86,7 +86,7 @@ it('provisions live routes on scheduled ticks, registers scorecard, and publishe
     expect(f.deliver).toHaveBeenCalledWith(
       expect.objectContaining({
         announcement: expect.objectContaining({
-          title: expect.stringContaining('Lifetime callout'),
+          title: `Bot updated · ${currentRelease.title}`,
         }),
       }),
       f.c.store.settings().channels.operations,

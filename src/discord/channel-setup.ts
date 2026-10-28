@@ -9,6 +9,7 @@ export const channelNames: Record<Route, string> = {
   watchlist: 'watchlist-alerts',
   summaries: 'daily-summaries',
   operations: 'bot-operations',
+  entries: 'entries',
 };
 interface ChannelRecord {
   id: string;

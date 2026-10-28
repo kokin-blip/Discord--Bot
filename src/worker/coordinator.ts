@@ -220,6 +220,7 @@ export class SignalCoordinator {
         }
         stage = 'publication';
         if (this.store.settings().paused) return new Response('Paused');
+        this.store.migrateEntryRoutes();
         const blockers: string[] = [];
         const setup = this.store.get<{ state: string; error?: string }>('channel_setup_status', {
           state: 'pending',

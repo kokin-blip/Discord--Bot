@@ -33,6 +33,7 @@ export const routes = [
   'watchlist',
   'summaries',
   'operations',
+  'entries',
 ] as const;
 export type Route = (typeof routes)[number];
 export interface Settings {

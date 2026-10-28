@@ -244,5 +244,19 @@ export const releases: readonly BotRelease[] = [
     ],
     removedCommands: ['/debug test'],
   },
+  {
+    id: '2026-10-27-dedicated-entry-channel',
+    title: 'Dedicated confirmed-entry channel',
+    changes: [
+      'Confirmed stock/ETF and crypto entry callouts now publish to an automatically created public #entries channel.',
+      'Breakout and retest setup alerts stay in the equity/crypto ideas channels; milestones and exits stay in trade-updates. Entry details continue in the original idea discussion thread.',
+      'Only unsent pending entries change destinations during upgrade; prior messages, delivery receipts, retry behavior and historical-entry labels are preserved.',
+    ],
+    addedCommands: [],
+    changedCommands: [
+      '/config channels: entries route available as an optional destination override.',
+    ],
+    removedCommands: [],
+  },
 ];
 export const currentRelease = releases.at(-1)!;

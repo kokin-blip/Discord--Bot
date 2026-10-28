@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { Store } from '../src/storage.js';
-import { equity } from '../src/domain.js';
+import { equity, crypto } from '../src/domain.js';
 import { fixture, idea } from './fixtures.js';
 import { advance } from '../src/core/strategy.js';
 import { defaults } from '../src/config.js';
@@ -86,6 +86,91 @@ it('requires fresh review and soak after changing strategy thresholds', () => {
     s.saveStrategy({ ...s.strategy(), minimumRR: 4 });
     expect(s.get('historical_replay_verified', true)).toBe(false);
     expect(s.get('soak_start', 1)).toBe(0);
+  } finally {
+    s.close();
+  }
+});
+it.each(['equity', 'crypto'] as const)(
+  'routes %s confirmed entries separately from setups and exits',
+  (market) => {
+    const s = new Store(':memory:');
+    try {
+      const data = fixture(),
+        r = advance(idea(data), data, defaults, data.provenance.asOf);
+      const instrument = market === 'equity' ? equity('TEST') : crypto('ETH-USD');
+      const entry = {
+        ...r.events.at(-1)!,
+        recovery: false,
+        instrument,
+        candidate: { ...r.idea.candidate, instrument },
+      };
+      const setup = {
+        ...entry,
+        id: 'setup',
+        state: 'setup_ready' as const,
+        candidate: { ...entry.candidate, entry: undefined },
+      };
+      const exit = { ...entry, id: 'exit', state: 'invalidated' as const };
+      s.saveIdea({ ...r.idea, candidate: entry.candidate }, [setup, entry, exit]);
+      const routes = Object.fromEntries(
+        s.pending(data.provenance.asOf).map((p) => [p.event.id, p.route]),
+      );
+      expect(routes).toEqual({
+        setup: market === 'equity' ? 'equity_ideas' : 'crypto_ideas',
+        [entry.id]: 'entries',
+        exit: 'updates',
+      });
+      s.saveIdea(r.idea, [entry]);
+      expect(s.pendingCount()).toBe(3);
+    } finally {
+      s.close();
+    }
+  },
+);
+it('migrates only unsent legacy entries and preserves receipts, retry state and non-entry routes', () => {
+  const s = new Store(':memory:');
+  try {
+    const data = fixture(),
+      r = advance(idea(data), data, defaults, data.provenance.asOf);
+    const base = { ...r.events.at(-1)!, recovery: false };
+    for (const id of ['unsent', 'dead', 'receipted', 'delivered'])
+      s.enqueue({ ...base, id }, 'crypto_ideas');
+    s.enqueue({ ...base, id: 'setup', state: 'setup_ready' }, 'crypto_ideas');
+    s.enqueue({ ...base, id: 'reversal', kind: 'watch_tracker' }, 'watchlist');
+    s.saveReceipt('receipted', 'old-ideas', 'original');
+    s.delivered('delivered');
+    s.db
+      .prepare(
+        "UPDATE outbox SET status='dead',attempts=10,next_attempt=12345 WHERE event_id='dead'",
+      )
+      .run();
+    s.migrateEntryRoutes();
+    const rows = s.db
+      .prepare('SELECT event_id,route,status,attempts,next_attempt FROM outbox')
+      .all() as {
+      event_id: string;
+      route: string;
+      status: string;
+      attempts: number;
+      next_attempt: number;
+    }[];
+    const byId = Object.fromEntries(rows.map((row) => [row.event_id, row]));
+    expect(byId.unsent).toMatchObject({ route: 'entries', status: 'pending' });
+    expect(byId.dead).toMatchObject({
+      route: 'entries',
+      status: 'dead',
+      attempts: 10,
+      next_attempt: 12345,
+    });
+    expect(byId.receipted).toMatchObject({ route: 'crypto_ideas', status: 'pending' });
+    expect(byId.delivered).toMatchObject({ route: 'crypto_ideas', status: 'delivered' });
+    expect(byId.setup!.route).toBe('crypto_ideas');
+    expect(byId.reversal!.route).toBe('watchlist');
+    expect(s.receipt('receipted', 'old-ideas')).toBe('original');
+    s.migrateEntryRoutes();
+    expect(
+      s.db.prepare('SELECT event_id,route,status,attempts,next_attempt FROM outbox').all(),
+    ).toEqual(rows);
   } finally {
     s.close();
   }
