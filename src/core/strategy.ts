@@ -48,11 +48,85 @@ export interface QualificationAttempt {
   direction: Direction;
   checks: QualificationCheck[];
 }
+export type EntryPolicy = 'baseline' | 'feasible' | 'state_aware';
+export interface EntryInterval {
+  low: number;
+  high: number;
+  lowInclusive: boolean;
+  highInclusive: boolean;
+}
+/** Piecewise intervals use the same nearest-pivot target selection as actual confirmation. */
+export function entryIntervals(
+  data: Dataset,
+  c: Candidate,
+  config: StrategyConfig,
+): EntryInterval[] {
+  if (!c.retest) return [];
+  const s = sign(c.direction),
+    minimum = config.minChase * c.atr,
+    maximum = config.maxChase * c.atr;
+  const confirmation = s * ((s === 1 ? c.retest.high : c.retest.low) - c.level);
+  const pivots = pivotLevels(
+    data.daily.filter((b) => b.end <= c.breakout.start),
+    c.direction,
+    config.pivotLookback,
+  )
+    .map((p) => s * (p - c.level))
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+  const cuts = [minimum, ...pivots.filter((p) => p > minimum && p < maximum), maximum];
+  const intervals: EntryInterval[] = [];
+  for (let n = 0; n < cuts.length - 1; n++) {
+    const left = cuts[n]!,
+      right = cuts[n + 1]!;
+    const target = pivots.find((p) => p > (left + right) / 2) ?? c.baseHigh - c.baseLow;
+    const lo = Math.max(left, confirmation),
+      hi = Math.min(right, target / (config.minimumRR + 1));
+    const lowInclusive = lo !== confirmation;
+    const highInclusive = hi !== right || n === cuts.length - 2;
+    if (hi < lo || (hi === lo && (!lowInclusive || !highInclusive))) continue;
+    intervals.push(
+      s === 1
+        ? { low: c.level + lo, high: c.level + hi, lowInclusive, highInclusive }
+        : {
+            low: c.level - hi,
+            high: c.level - lo,
+            lowInclusive: highInclusive,
+            highInclusive: lowInclusive,
+          },
+    );
+  }
+  // At a pivot itself targetFor selects the next pivot, so boundary prices need their own check.
+  for (const distance of cuts) {
+    if (distance <= confirmation) continue;
+    const price = c.level + s * distance;
+    const target = targetFor(
+      data.daily.filter((b) => b.end <= c.breakout.start),
+      price,
+      c.level,
+      c.baseHigh - c.baseLow,
+      c.direction,
+      config.pivotLookback,
+    );
+    if ((s * (target - price)) / distance < config.minimumRR) continue;
+    if (
+      !intervals.some(
+        (i) =>
+          (price > i.low || (i.lowInclusive && price === i.low)) &&
+          (price < i.high || (i.highInclusive && price === i.high)),
+      )
+    )
+      intervals.push({ low: price, high: price, lowInclusive: true, highInclusive: true });
+  }
+  intervals.sort((a, b) => a.low - b.low);
+  return intervals;
+}
 export function detect(
   data: Dataset,
   config: StrategyConfig,
   now: number,
   observe?: (attempt: QualificationAttempt) => void,
+  policy: EntryPolicy = 'baseline',
 ): Candidate[] {
   const daily = completed(data.daily, now),
     weekly = completed(data.weekly, now),
@@ -154,7 +228,13 @@ export function detect(
         },
       ];
       observe?.({ at: breakout.end, direction, checks });
-      if (checks.some((check) => !check.passed)) continue;
+      if (
+        checks.some(
+          (check) =>
+            !check.passed && !(policy !== 'baseline' && check.name === 'Provisional reward/risk'),
+        )
+      )
+        continue;
       const candidate: Candidate = {
         id: stableId(data.instrument.id, direction, breakout.start, strategyVersion(config)),
         instrument: data.instrument,
@@ -176,7 +256,7 @@ export function detect(
           `At least ${config.minimumRR}R room to target`,
         ],
       };
-      candidate.retest = findRetest(data, candidate, config, now);
+      candidate.retest = findRetest(data, candidate, config, now, policy);
       if (candidate.retest) candidate.reasons.push('Low-volume daily retest qualified');
       results.push(candidate);
     }
@@ -189,6 +269,7 @@ export function findRetest(
   candidate: Candidate,
   config: StrategyConfig,
   now: number,
+  policy: EntryPolicy = 'baseline',
 ): Bar | undefined {
   const daily = completed(data.daily, now);
   const origin = daily.findIndex((b) => b.start === candidate.breakout.start);
@@ -210,8 +291,10 @@ export function findRetest(
               .slice(-config.volumePeriod)
               .map((x) => x.volume),
           )
-    )
-      return b;
+    ) {
+      if (policy === 'baseline' || entryIntervals(data, { ...candidate, retest: b }, config).length)
+        return b;
+    }
   }
   return undefined;
 }
@@ -311,6 +394,7 @@ export function advance(
   config: StrategyConfig,
   now: number,
   allowEntry = true,
+  policy: EntryPolicy = 'baseline',
 ): { idea: Idea; events: SignalEvent[] } {
   const idea = structuredClone(original),
     events: SignalEvent[] = [],
@@ -326,11 +410,32 @@ export function advance(
     if (idea.state === 'watching' && c.retest && b.start >= c.retest.end)
       emit('setup_ready', c.retest.end, ['Retest complete; awaiting 15-minute confirmation']);
     idea.lastBar = b.end;
-    if (s * (b.close - c.level) < 0) {
+    const setupDailyFailure =
+      policy === 'state_aware' &&
+      c.entry === undefined &&
+      completed(data.daily, b.end).some(
+        (d) => d.end > c.breakout.end && s * (d.close - c.level) < 0,
+      );
+    const throughLevel = s * (b.close - c.level) < 0;
+    const setupRetestFailure =
+      policy === 'state_aware' &&
+      c.entry === undefined &&
+      c.retest &&
+      b.start >= c.retest.end &&
+      s * (b.close - (s === 1 ? c.retest.low : c.retest.high)) < 0;
+    if (
+      policy === 'state_aware' && c.entry === undefined
+        ? setupDailyFailure || setupRetestFailure
+        : throughLevel
+    ) {
       emit(
         'invalidated',
         b.end,
-        ['15-minute candle closed through breakout level'],
+        [
+          policy === 'state_aware' && c.entry === undefined
+            ? 'Pre-entry setup structure failed'
+            : '15-minute candle closed through breakout level',
+        ],
         c.entry === undefined ? undefined : observations(b, c, s),
       );
       break;
@@ -355,11 +460,13 @@ export function advance(
           config.pivotLookback,
         );
       if (distance > config.maxChase * c.atr) {
+        if (policy !== 'baseline') continue;
         emit('expired', b.end, ['Confirmation exceeded chase limit']);
         break;
       }
       if (distance < config.minChase * c.atr) continue;
       if ((s * (target - b.close)) / distance < config.minimumRR) {
+        if (policy !== 'baseline') continue;
         emit('expired', b.end, ['Confirmation offers less than minimum reward/risk']);
         break;
       }

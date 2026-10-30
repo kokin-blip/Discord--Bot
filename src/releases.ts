@@ -258,5 +258,22 @@ export const releases: readonly BotRelease[] = [
     ],
     removedCommands: [],
   },
+  {
+    id: '2026-10-29-entry-reliability-and-shadow-research',
+    title: 'Entry reliability and separate shadow research',
+    changes: [
+      'Bounded, resumable history repair detects old holes behind fresh candles. Instrument-level evaluation and silent recovery protect fresh monitoring without replaying historical entries.',
+      'Confirmed entries publish complete text before optional chart/options enrichment edits the same parent. Separate source, queue and first-delivery timing preserves immutable events and receipts.',
+      'Three frozen daily-retest policies compare in isolated shadow cohorts with paired opportunities, explicit unknown coverage, execution delays, cost sensitivities and calendar-week uncertainty. Public entry rules and frozen production ideas remain unchanged.',
+      'Local checkpointed historical collection and entry comparisons reserve a six-month holdout. New entry-filter promotion evidence requires a homogeneous execution-v2 cohort; legacy evidence and reversal reviews remain available.',
+    ],
+    addedCommands: ['/learning entries'],
+    changedCommands: [
+      '/status, /health, /debug check, /config show: repair progress, unresolved gaps, instrument evaluation health, timing coverage and research backlog.',
+      '/explain symbol: confirmation blockers, feasible intervals and active frozen rules alongside current settings.',
+      '/learning promote: new entry-filter evidence requires execution-v2; shadow entry-policy IDs cannot be activated.',
+    ],
+    removedCommands: [],
+  },
 ];
 export const currentRelease = releases.at(-1)!;

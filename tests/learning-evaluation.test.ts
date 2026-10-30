@@ -63,6 +63,27 @@ function evaluation(tier: 'normal' | 'recurring_failure' = 'normal'): Evaluation
     definition: { filter: 'volume025' },
   };
 }
+it('keeps legacy entry evidence readable but requires a new homogeneous execution-v2 cohort', () => {
+  const store = new Store(':memory:');
+  try {
+    const legacy = evaluation();
+    store.db
+      .prepare('INSERT INTO learning_evaluations VALUES(?,?,?,?,?,?)')
+      .run(
+        legacy.id,
+        legacy.sourceId,
+        legacy.family,
+        legacy.version,
+        legacy.endsAt,
+        JSON.stringify(legacy),
+      );
+    const result = new LearningEvaluations(store).inspect(legacy.id)!;
+    expect(result.blockers).toContain('FRESH_EXECUTION_V2_COHORT_REQUIRED');
+    expect(result.reviewReady).toBe(false);
+  } finally {
+    store.close();
+  }
+});
 function evidence(count = 100): EvidenceRow[] {
   return Array.from({ length: count }, (_, n) => ({
     id: String(n),
@@ -106,6 +127,27 @@ function persist(store: Store, candidate: Evaluation, rows: EvidenceRow[]) {
             row.simulationR === undefined
               ? { status: 'unavailable', reason: 'Missing candles' }
               : { status: 'closed', rMultiple: row.simulationR },
+        }),
+      );
+    if (row.settled && candidate.definition.executionSchema === 'execution-v2')
+      store.db.prepare('INSERT INTO learning_measurements_v2 VALUES(?,?)').run(
+        id,
+        JSON.stringify({
+          schema: 'execution-v2',
+          sampleId: id,
+          finalizedAt: row.callout.marketTime + QUARTER,
+          economics: {
+            schema: 'execution-v2',
+            cases: [
+              {
+                name: 'normal:cost1',
+                execution:
+                  row.simulationR === undefined
+                    ? { status: 'unavailable', reason: 'Missing candles' }
+                    : { status: 'closed', rMultiple: row.simulationR },
+              },
+            ],
+          },
         }),
       );
   }

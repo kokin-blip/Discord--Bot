@@ -45,13 +45,6 @@ export class SignalService {
         this.store.set('discovery_error', diagnosticCode(error));
       };
       const newDay = this.store.get('discovery_day', '') !== utcDate(now);
-      const pool =
-        discovery && (newDay || force || announcement)
-          ? await this.data.universe(now).catch((error) => {
-              discoveryFailure(error);
-              return [];
-            })
-          : [];
       progress('daily_history');
       // Current watchlists take precedence over discovery history downloads.
       const refreshedMonitored = monitor
@@ -78,6 +71,15 @@ export class SignalService {
       await this.refresh(refreshedMonitored, now, 'daily', force);
       progress('intraday_history');
       await this.refresh(refreshedMonitored, now, 'intraday');
+      // Fresh monitoring and entered positions own the request budget before discovery.
+      progress('discovery');
+      const pool =
+        discovery && (newDay || force || announcement)
+          ? await this.data.universe(now).catch((error) => {
+              discoveryFailure(error);
+              return [];
+            })
+          : [];
       progress('daily_history');
       try {
         await this.data.refreshDaily(pool, now);
@@ -128,6 +130,11 @@ export class SignalService {
       let recovered = 0;
       for (const i of instruments) {
         try {
+          const instrumentRecovery =
+            recovery ||
+            this.store.get(`continuity_gap:${i.id}`, false) ||
+            (this.store.get(`continuous_scan:${i.id}`, 0) > 0 &&
+              now - this.store.get(`continuous_scan:${i.id}`, 0) > 10 * 60_000);
           const dataset = await this.data.dataset(i, now),
             cutoff = now - (i.market === 'equity' ? 16 * 60_000 : 0);
           checkIntraday(dataset, cutoff - 2 * QUARTER, cutoff);
@@ -169,7 +176,7 @@ export class SignalService {
               undefined,
               config,
             );
-            event.recovery = recovery || now - event.marketTime > DAY;
+            event.recovery = instrumentRecovery || now - event.marketTime > DAY;
             this.store.saveIdea(idea, [event]);
             existing.push(idea);
           }
@@ -193,7 +200,7 @@ export class SignalService {
             );
             for (const event of result.events) {
               event.recordedAt = now;
-              event.recovery = recovery || event.marketTime < cutoff - 2 * QUARTER;
+              event.recovery = instrumentRecovery || event.marketTime < cutoff - 2 * QUARTER;
               if (event.recovery) recovered++;
               if (!event.recovery && event.state === 'entry_triggered')
                 thresholdNewEntries.add(event.ideaId);
@@ -222,14 +229,22 @@ export class SignalService {
               this.store.saveIdea(result.idea, [snapshot]);
             }
           }
-          trackWatchlist(this.store, dataset, now, recovery);
-          if (this.store.settings().alerts && !recovery) this.alerts(dataset, now);
+          try {
+            trackWatchlist(this.store, dataset, now, instrumentRecovery);
+            this.store.set(`tracker_quality:${i.id}`, null);
+          } catch (error) {
+            this.store.set(`tracker_quality:${i.id}`, diagnosticCode(error));
+          }
+          if (this.store.settings().alerts && !instrumentRecovery) this.alerts(dataset, now);
           this.store.set(`quality:${i.id}`, null);
+          this.store.set(`continuous_scan:${i.id}`, now);
+          this.store.set(`continuity_gap:${i.id}`, false);
           this.store.set(
             `freshness:${i.id}`,
             dataset.intraday.at(-1)?.end ?? dataset.daily.at(-1)!.end,
           );
         } catch (e) {
+          this.store.set(`continuity_gap:${i.id}`, true);
           thresholdDatasets.delete(i.id);
           this.quality(i, e);
           if (e instanceof Error && e.message === 'HISTORY_REVISED_REFRESH_REQUIRED') {
@@ -325,7 +340,16 @@ export class SignalService {
       if (!group.length) continue;
       try {
         if (interval === 'daily') await this.data.refreshDaily(group, now, force);
-        else await this.data.refreshIntraday(group, now);
+        else {
+          for (const i of group) {
+            try {
+              await this.data.refreshIntraday([i], now);
+            } catch (error) {
+              this.store.set(`refresh_error:${i.id}:15m`, { at: now, code: diagnosticCode(error) });
+              this.quality(i, error);
+            }
+          }
+        }
         this.store.set(`refresh_error:${market}:${interval}`, null);
       } catch (error) {
         this.store.set(`refresh_error:${market}:${interval}`, {

@@ -25,7 +25,9 @@
     "format:check": "prettier --check src scripts tests docs *.json *.jsonc *.md .github",
     "preview:trackers": "tsx scripts/preview-trackers.ts",
     "news:replay": "node --import tsx scripts/news-replay.ts",
-    "news:smoke": "node --import tsx scripts/news-smoke.ts"
+    "news:smoke": "node --import tsx scripts/news-smoke.ts",
+    "research:collect": "node --import tsx scripts/research-collect.ts",
+    "research:entries": "node --import tsx scripts/research-entries.ts"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",

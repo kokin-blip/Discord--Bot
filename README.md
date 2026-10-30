@@ -21,6 +21,8 @@ Copy `.env.example` to `.env` for registration/preflight tools and `.dev.vars.ex
 
 ## Commands
 
+Entry reliability now repairs retained-history holes in bounded background pages. Independent daily-retest research leaves public rules unchanged; `/learning entries` returns member-accessible ephemeral evidence and a JSON export. See [entry research and collection](docs/ENTRY-RESEARCH.md) for checkpointed historical tools, costs, timing assumptions and coverage limits.
+
 | Command                          | Purpose                                                                             |
 | -------------------------------- | ----------------------------------------------------------------------------------- |
 | `/watch add/remove/restore/list` | Up to 10 manual pins, persistent exclusions, automatic selections                   |

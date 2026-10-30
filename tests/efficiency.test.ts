@@ -31,8 +31,9 @@ it('keeps warm crypto incremental and saves it despite failure of a cold product
       [warm, cold],
       last.end + QUARTER,
     );
-    expect(calls[0]?.start).toBe(last.start - QUARTER);
-    expect(calls[1]!.start).toBeLessThan(last.start - 30 * 86400000);
+    expect(calls[0]?.start).toBe(last.start);
+    // Cold history is repaired in bounded background pages after the fresh window.
+    expect(calls[1]!.start).toBeGreaterThanOrEqual(last.start - 2 * QUARTER);
     expect(store.bars(warm, '15m').at(-1)?.end).toBe(last.end + QUARTER);
     expect(store.get(`refresh_error:${cold.id}:15m`, null)).not.toBeNull();
   } finally {

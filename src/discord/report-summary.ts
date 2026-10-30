@@ -11,17 +11,20 @@ export function reportSummary(name: string, result: unknown): string {
   if (typeof result === 'string') return result;
   if (name === 'health') {
     const h = result as ReturnType<typeof health>;
-    return `Monitoring: ${h.monitoring} · ${h.paused ? 'paused' : 'enabled'}${h.budgetPaused ? ' · resource limit reached' : ''}\nPublication: ${h.publicationBlockers.join(', ') || 'ready'}\nChannel setup: ${h.channelSetup.state}${h.channelSetup.error ? ` · ${h.channelSetup.error}` : ''}\nDeliveries: ${h.queue.pending} pending · oldest visible ${h.queue.oldestVisibleMinutes.toFixed(0)}m · ${h.queue.reviewRequired} require review\n${
+    return `Monitoring: ${h.monitoring} · ${h.paused ? 'paused' : 'enabled'}${h.budgetPaused ? ' · resource limit reached' : ''}\nPublication: ${h.publicationBlockers.join(', ') || 'ready'}\nChannel setup: ${h.channelSetup.state}${h.channelSetup.error ? ` · ${h.channelSetup.error}` : ''}\nHistory repair: ${h.historyRepair.pending} pending · ${h.historyRepair.unavailable} unresolved · ${h.historyRepair.outsideRetention.length} outside retention\nEntry research: shadow only · ${h.entryResearch.progress ? JSON.stringify(h.entryResearch.progress) : 'awaiting first tick'}\nDeliveries: ${h.queue.pending} pending · oldest visible ${h.queue.oldestVisibleMinutes.toFixed(0)}m · ${h.queue.reviewRequired} require review\n${
       h.instruments
-        .filter((i) => i.quality)
-        .map((i) => `${i.symbol}: ${i.quality}`)
+        .filter((i) => i.quality || i.trackerQuality)
+        .map(
+          (i) =>
+            `${i.symbol}: ${i.quality ?? 'strategy checks passed'}${i.trackerQuality ? ` · trackers: ${i.trackerQuality}` : ''}`,
+        )
         .slice(0, 10)
         .join('\n') || 'No cached symbol-quality blockers.'
     }\nThreshold: ${h.threshold.config.enabled ? 'enabled' : 'disabled'} · ${h.threshold.active} active · ${h.threshold.error ?? 'no cached error'}\nFull diagnostics attached.`;
   }
   if (name === 'explain') {
     const e = result as ReturnType<typeof explain>;
-    return `${e.symbol} · ${e.candidates.length} qualifying setup(s) · ${e.quality ?? 'daily history checks passed'}\n${e.attempts.map((a) => `${a!.direction} latest attempted candle:\n${a!.checks.map((c) => `${c.passed ? '✓' : '✗'} ${c.name}: ${typeof c.value === 'number' ? Number(c.value.toPrecision(5)) : c.value} (${c.requirement})`).join('\n')}`).join('\n')}\n${e.note}`.slice(
+    return `${e.symbol} · ${e.candidates.length} qualifying setup(s) · ${e.quality ?? 'daily history checks passed'}\n${e.activeIdeas.map((i) => `${i.state} · frozen ${i.version}: ${i.confirmationBlockers.join(', ') || 'entry already confirmed'}; ${i.entryIntervals.length} feasible interval(s)`).join('\n')}\n${e.attempts.map((a) => `${a!.direction} latest attempted candle:\n${a!.checks.map((c) => `${c.passed ? '✓' : '✗'} ${c.name}: ${typeof c.value === 'number' ? Number(c.value.toPrecision(5)) : c.value} (${c.requirement})`).join('\n')}`).join('\n')}\n${e.note}`.slice(
       0,
       1850,
     );

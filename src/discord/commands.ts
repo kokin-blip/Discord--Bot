@@ -1,4 +1,8 @@
 import { Scorecard } from '../scorecard.js';
+import { EntryResearch } from '../entry-research/engine.js';
+import { entryReport } from '../entry-research/report.js';
+import { repairReport } from '../history-repair.js';
+import { timingReport } from '../entry-research/timing.js';
 import { thresholdCommand, handleThreshold } from './threshold.js';
 import { ThresholdStore } from '../threshold/store.js';
 import { newsCommand, handleNews } from './news.js';
@@ -299,7 +303,7 @@ commands.push(
 const learning = new SlashCommandBuilder()
   .setName('learning')
   .setDescription('Inspect learning reviews and control experimental filters');
-for (const action of ['report', 'cases', 'experiments'])
+for (const action of ['report', 'cases', 'experiments', 'entries'])
   learning.addSubcommand((s) => s.setName(action).setDescription(`Inspect learning ${action}`));
 for (const action of ['promote', 'rollback'])
   learning.addSubcommand((s) =>
@@ -367,7 +371,8 @@ export class CommandHandler {
         (i.commandName === 'follow' && sub === 'list') ||
         (i.commandName === 'watch' && sub === 'list') ||
         (i.commandName === 'debug' && sub === 'check') ||
-        (i.commandName === 'learning' && ['report', 'cases', 'experiments'].includes(sub ?? ''));
+        (i.commandName === 'learning' &&
+          ['report', 'cases', 'experiments', 'entries'].includes(sub ?? ''));
     const member = await i.guild!.members.fetch(i.user.id),
       admin = member.permissions.has(PermissionFlagsBits.Administrator);
     if (
@@ -493,6 +498,9 @@ export class CommandHandler {
             scorecard: new Scorecard(this.store).summary().coverage,
             threshold: new ThresholdStore(this.store).status(),
             strategy: this.store.strategy(),
+            historyRepair: repairReport(this.store),
+            entryTiming: timingReport(this.store),
+            entryResearch: new EntryResearch(this.store).summary(),
             version: publicationVersion(this.store),
           };
         const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
@@ -504,6 +512,20 @@ export class CommandHandler {
       }
       if (i.commandName === 'learning') {
         const learning = new Learning(this.store);
+        if (sub === 'entries') {
+          const result = entryReport(this.store);
+          await i.editReply({
+            content:
+              'Entry research · shadow only. Public rules are unchanged. Costs and execution prices are simulations; sufficient comparison evidence never enables a policy.',
+            files: [
+              {
+                attachment: Buffer.from(JSON.stringify(result, null, 2)),
+                name: 'entry-research.json',
+              },
+            ],
+          });
+          return;
+        }
         if (sub === 'promote' || sub === 'rollback') {
           const id = i.options.getString('id', true);
           const version =
@@ -804,9 +826,14 @@ export class CommandHandler {
             budget,
             learning: new Learning(this.store).status(),
             threshold: new ThresholdStore(this.store).status(),
+            historyRepair: repairReport(this.store),
+            entryTiming: timingReport(this.store),
+            entryResearch: new EntryResearch(this.store).summary(),
             instruments: monitored.map((x) => ({
               symbol: x.symbol,
               pausedReason: this.store.get(`quality:${x.id}`, null),
+              trackerQuality: this.store.get(`tracker_quality:${x.id}`, null),
+              continuousThrough: this.store.get(`continuous_scan:${x.id}`, null),
               dataTime: this.store.get(`freshness:${x.id}`, null),
             })),
           },

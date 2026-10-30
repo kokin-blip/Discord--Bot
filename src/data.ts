@@ -2,13 +2,15 @@ import { diagnosticCode } from './core/errors.js';
 import type { Dataset, Instrument, MarketDataProvider, Session } from './domain.js';
 import { benchmarkFor } from './domain.js';
 import type { Store } from './sql-store.js';
-import { DAY, weeklyBars, utcDate, expectedIntraday } from './core/time.js';
+import { DAY, QUARTER, weeklyBars, utcDate, expectedIntraday } from './core/time.js';
 import { checkDaily, historyChanged } from './core/quality.js';
 import { mean } from './core/indicators.js';
+import { observeSource } from './entry-research/timing.js';
+import { scheduleRepair, repairHistory } from './history-repair.js';
 export class DataService {
-  beginWork() {
-    this.equities.beginWork?.();
-    this.crypto.beginWork?.();
+  beginWork(maxRequests?: number, startedAt?: number) {
+    this.equities.beginWork?.(maxRequests, startedAt);
+    this.crypto.beginWork?.(maxRequests, startedAt);
   }
   endWork() {
     this.equities.endWork?.();
@@ -21,6 +23,17 @@ export class DataService {
   ) {}
   provider(i: Instrument) {
     return i.market === 'equity' ? this.equities : this.crypto;
+  }
+  async repair(now: number, remainingRequests = 24, startedAt = Date.now()) {
+    if (remainingRequests <= 0 || Date.now() - startedAt >= 25_000) return 0;
+    this.equities.beginWork?.(remainingRequests, startedAt);
+    this.crypto.beginWork?.(remainingRequests, startedAt);
+    try {
+      await repairHistory(this.store, (i) => this.provider(i), now);
+      return this.store.get('provider_work', { requests: 0 }).requests;
+    } finally {
+      this.endWork();
+    }
   }
   async sessions(now: number): Promise<Session[]> {
     const saved = this.store.get<{ day: string; rows: Session[] }>('calendar', {
@@ -106,6 +119,11 @@ export class DataService {
       ...new Map(instruments.flatMap((i) => [i, benchmarkFor(i)]).map((i) => [i.id, i])).values(),
     ];
     const sessions = list.some((i) => i.market === 'equity') ? await this.sessions(now) : [];
+    for (const i of list) {
+      if (!this.store.bars(i, '1d').length)
+        this.store.set(`history_origin:${i.id}:1d`, Math.floor((now - 800 * DAY) / DAY) * DAY);
+      scheduleRepair(this.store, i, '1d', sessions, now);
+    }
     for (const market of ['equity', 'crypto'] as const) {
       const provider = market === 'equity' ? this.equities : this.crypto;
       const stamp =
@@ -123,9 +141,11 @@ export class DataService {
       for (const i of due) {
         const cached = this.store.bars(i, '1d');
         const start =
-          cached.length >= 252 && !this.store.get(`history_changed:${i.id}`, false)
+          cached.length && !this.store.get(`history_changed:${i.id}`, false)
             ? Math.max(now - 800 * DAY, cached.at(-1)!.start - 7 * DAY)
-            : now - 800 * DAY;
+            : this.store.get(`history_changed:${i.id}`, false)
+              ? now - 800 * DAY
+              : now - 7 * DAY;
         groups.set(start, [...(groups.get(start) ?? []), i]);
       }
       let failure: unknown;
@@ -134,7 +154,12 @@ export class DataService {
         for (let offset = 0; offset < members.length; offset += size) {
           const group = members.slice(offset, offset + size);
           try {
-            const fetched = await provider.bars(group, '1d', start, now);
+            const changedPages = new Set<string>();
+            const fetched = await provider.bars(group, '1d', start, now, (i, bars) => {
+              if (historyChanged(this.store.bars(i, '1d'), bars)) changedPages.add(i.id);
+              this.store.cache(i, '1d', bars);
+              observeSource(this.store, i, '1d', bars, Date.now());
+            });
             for (const i of group) {
               const bars = fetched.get(i.id) ?? [];
               if (!bars.length) {
@@ -144,11 +169,14 @@ export class DataService {
                 });
                 continue;
               }
-              const changed = historyChanged(this.store.bars(i, '1d'), bars);
+              const changed =
+                changedPages.has(i.id) || historyChanged(this.store.bars(i, '1d'), bars);
               this.store.cache(i, '1d', bars);
+              observeSource(this.store, i, '1d', bars, Date.now());
               this.store.set(`history_changed:${i.id}`, changed);
               this.store.set(`daily_refresh:${i.id}`, stamp);
               this.store.set(`refresh_error:${i.id}:1d`, null);
+              scheduleRepair(this.store, i, '1d', sessions, now);
             }
           } catch (error) {
             failure = error;
@@ -167,16 +195,34 @@ export class DataService {
       const last = this.store.bars(i, '15m').at(-1);
       const cutoff = now - (i.market === 'equity' ? 16 * 60_000 : 0);
       const sessions = i.market === 'equity' ? await this.sessions(now) : [];
+      if (!last)
+        this.store.set(
+          `history_origin:${i.id}:15m`,
+          Math.floor((now - 35 * DAY) / QUARTER) * QUARTER,
+        );
+      scheduleRepair(this.store, i, '15m', sessions, now);
       if (
         last &&
         !this.store.get(`history_changed:${i.id}`, false) &&
         !expectedIntraday(last.end, cutoff, i.market, sessions).length
       )
         continue;
-      const start = last ? Math.max(now - 35 * DAY, last.start - 900_000) : now - 35 * DAY;
+      const due = expectedIntraday(
+        Math.max(now - 35 * DAY, last?.end ?? now - 35 * DAY),
+        cutoff,
+        i.market,
+        sessions,
+      );
+      const fresh = due.slice(-2)[0] ?? last?.start ?? cutoff - 2 * QUARTER;
+      const start = last ? Math.max(fresh - QUARTER, last.start) : fresh;
       try {
-        const fetched = await this.provider(i).bars([i], '15m', start, now);
+        const fetched = await this.provider(i).bars([i], '15m', start, now, (instrument, bars) => {
+          this.store.cache(instrument, '15m', bars);
+          observeSource(this.store, instrument, '15m', bars, Date.now());
+        });
         this.store.cache(i, '15m', fetched.get(i.id) ?? []);
+        observeSource(this.store, i, '15m', fetched.get(i.id) ?? [], Date.now());
+        scheduleRepair(this.store, i, '15m', sessions, now);
         this.store.set(`refresh_error:${i.id}:15m`, null);
       } catch (error) {
         this.store.set(`refresh_error:${i.id}:15m`, {

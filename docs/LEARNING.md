@@ -88,3 +88,7 @@ Local automated checks and synthetic previews verify implementation and formatti
 ## Public lifetime totals
 
 `/scorecard` uses durable source/result projections, separate from capped detailed learning cases and model-training records. It counts one delivered real call per idea/family across strategy versions and markets, including former test-channel history. Existing learning labels take precedence over daily records and conservative legacy reconstruction. Missing/uncertain outcomes and backfill coverage remain explicit; training pauses do not reset totals. It does not combine setup qualifications or reversal confirmations with entry wins, and it never fetches market data or renders charts.
+
+# Separate entry-policy research
+
+`/learning entries` is a member-accessible ephemeral comparison with a JSON attachment. It uses isolated shadow storage and cannot activate a policy. New entry-filter evaluations require homogeneous execution-v2 measurements; existing v1 evidence stays readable but cannot qualify a new promotion. Reversal reviews retain their existing requirements. See [entry reliability and research](ENTRY-RESEARCH.md).

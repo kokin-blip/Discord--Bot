@@ -10,6 +10,7 @@ it('registers learning inspection and explicit promotion/rollback commands', () 
     'report',
     'cases',
     'experiments',
+    'entries',
     'promote',
     'rollback',
   ]);
@@ -25,7 +26,7 @@ it('allows member inspection but denies promotion and rollback without a manager
       { image: () => false, status: () => ({ paused: false }) },
       'guild',
     );
-    for (const sub of ['report', 'cases', 'experiments', 'promote', 'rollback']) {
+    for (const sub of ['report', 'cases', 'experiments', 'entries', 'promote', 'rollback']) {
       const i = {
         guildId: 'guild',
         commandName: 'learning',
@@ -53,6 +54,7 @@ it('allows member inspection but denies promotion and rollback without a manager
         expect(i.editReply).toHaveBeenCalledWith(
           expect.objectContaining({ files: expect.any(Array) }),
         );
+      if (sub === 'entries') expect(i.deferReply).toHaveBeenCalledWith({ ephemeral: true });
     }
     expect(store.get('learning_last_review', null)).toBeNull();
   } finally {

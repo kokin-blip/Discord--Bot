@@ -137,7 +137,7 @@ export interface OptionsContext {
   asOf?: number;
 }
 export interface MarketDataProvider {
-  beginWork?(): void;
+  beginWork?(maxRequests?: number, startedAt?: number): void;
   endWork?(): void;
   discover(now: number): Promise<Instrument[]>;
   bars(
@@ -145,7 +145,15 @@ export interface MarketDataProvider {
     interval: Interval,
     start: number,
     now: number,
+    onPage?: (instrument: Instrument, bars: Bar[]) => void,
   ): Promise<Map<string, Bar[]>>;
+  barPage?(
+    instrument: Instrument,
+    interval: Interval | '1m',
+    start: number,
+    end: number,
+    cursor?: string,
+  ): Promise<{ bars: Bar[]; next?: string }>;
   calendar(start: number, end: number): Promise<Session[]>;
   optionQuotes?(contracts: string[], now: number): Promise<OptionQuote[]>;
   options?(

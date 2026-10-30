@@ -34,6 +34,10 @@ function harness(store: Store) {
           author: { id: 'bot' },
           embeds: payload.embeds.map((e: any) => e.toJSON()),
           hasThread: false,
+          edit: vi.fn(async (next: any) => {
+            message.embeds = next.embeds.map((e: any) => e.toJSON());
+            return message;
+          }),
           startThread: vi.fn(async () => {
             message.hasThread = true;
             message.thread = channels.get('thread');
@@ -69,6 +73,30 @@ function harness(store: Store) {
   );
   return { main, entries, updates, thread, charts, publisher, makeChannel };
 }
+it('delivers entry text and receipts before optional enrichment, then edits the same parent once', async () => {
+  const store = new Store(':memory:');
+  try {
+    const h = harness(store),
+      e = events(),
+      entry = e.advanced.events.find((e) => e.state === 'entry_triggered')!;
+    store.saveIdea(e.advanced.idea, [entry]);
+    await h.publisher.deliver(entry, 'entries');
+    expect(h.charts.render).not.toHaveBeenCalled();
+    expect(h.entries.send).toHaveBeenCalledTimes(1);
+    const receipt = store.receipt(entry.id, 'entries')!;
+    expect(receipt).toBeDefined();
+    await h.publisher.enrichEntries(e.data.provenance.asOf);
+    const message = await h.entries.messages.fetch(receipt);
+    expect(message.edit).toHaveBeenCalledTimes(1);
+    expect(h.charts.render).toHaveBeenCalledTimes(1);
+    expect(store.receipt(entry.id, 'entries')).toBe(receipt);
+    await h.publisher.enrichEntries(e.data.provenance.asOf + 60_000);
+    expect(message.edit).toHaveBeenCalledTimes(1);
+    expect(h.entries.send).toHaveBeenCalledTimes(1);
+  } finally {
+    store.close();
+  }
+});
 function events(direction: 'bullish' | 'bearish' = 'bullish') {
   const data = fixture(direction),
     original = idea(data);

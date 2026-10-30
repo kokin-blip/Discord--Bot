@@ -1,8 +1,9 @@
 import type { Store } from '../sql-store.js';
 export class HttpClient {
-  private work?: { startedAt: number; requests: number };
-  beginWork() {
-    this.work = { startedAt: Date.now(), requests: 0 };
+  private work?: { startedAt: number; requests: number; limit: number };
+  beginWork(maxRequests = 24, startedAt = Date.now()) {
+    this.work = { startedAt, requests: 0, limit: Math.max(0, Math.min(24, maxRequests)) };
+    this.store?.set('provider_work', this.work);
   }
   endWork() {
     this.work = undefined;
@@ -21,7 +22,10 @@ export class HttpClient {
     const host = new URL(url).hostname,
       minGap = host.includes('coinbase') ? 1000 : 350;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (this.work && (this.work.requests >= 24 || Date.now() - this.work.startedAt >= 25_000))
+      if (
+        this.work &&
+        (this.work.requests >= this.work.limit || Date.now() - this.work.startedAt >= 25_000)
+      )
         throw new Error('PROVIDER_WORK_LIMIT');
       if (this.store?.get('budget_paused', false)) throw new Error('EGRESS_BUDGET_PAUSED');
       const blocked = this.store?.get(`retry_after:${host}`, 0) ?? 0;

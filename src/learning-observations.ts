@@ -1,6 +1,7 @@
 import type { Session, SignalEvent } from './domain.js';
 import type { Family } from './learning.js';
 import type { Store } from './sql-store.js';
+import { EntryMeasurements } from './entry-research/measurements.js';
 import { DAY, QUARTER, dayStart, expectedIntraday, validateBars } from './core/time.js';
 import { stableId } from './core/strategy.js';
 import { beginExecution, stepExecution, type Execution } from './research/execution.js';
@@ -65,6 +66,7 @@ export class LearningObservations {
     if (!realCall(callout)) return;
     const id = sampleId(callout, family);
     if (this.measurement(id)) return;
+    if (family === 'strategy_entry') new EntryMeasurements(this.store).start(id, callout);
     const config =
       family === 'reversal_warning' ? undefined : this.store.version(callout.strategyVersion);
     const observation: Observation = {

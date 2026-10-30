@@ -6,7 +6,15 @@ import type { Store } from './sql-store.js';
 import { benchmarkFor, type Dataset, type Instrument, type SignalEvent } from './domain.js';
 import { weeklyBars, sessionsAfter, DAY } from './core/time.js';
 import { checkDaily } from './core/quality.js';
-import { detect, strategyVersion, type QualificationAttempt } from './core/strategy.js';
+import {
+  detect,
+  entryIntervals,
+  strategyVersion,
+  type QualificationAttempt,
+} from './core/strategy.js';
+import { EntryResearch } from './entry-research/engine.js';
+import { repairReport } from './history-repair.js';
+import { timingReport } from './entry-research/timing.js';
 import { productionBlockers } from './worker/publication.js';
 
 export function cachedDataset(store: Store, instrument: Instrument, now: number): Dataset {
@@ -73,7 +81,29 @@ export function explain(store: Store, instrument: Instrument, now: number) {
     activeIdeas: store
       .activeIdeas()
       .filter((i) => i.candidate.instrument.id === instrument.id)
-      .map((i) => ({ id: i.candidate.id, state: i.state, version: i.candidate.strategyVersion })),
+      .map((i) => {
+        const frozen = store.version(i.candidate.strategyVersion),
+          c = i.candidate;
+        const intervals = entryIntervals(data, c, frozen);
+        return {
+          id: c.id,
+          state: i.state,
+          version: c.strategyVersion,
+          frozenRules: frozen,
+          entryIntervals: intervals,
+          intervalPolicy: 'Research feasibility diagnostic; production rules remain baseline.',
+          confirmationBlockers:
+            c.entry !== undefined
+              ? []
+              : !c.retest
+                ? ['QUALIFYING_DAILY_RETEST_REQUIRED']
+                : !intervals.length
+                  ? ['NO_FEASIBLE_ENTRY_ZONE']
+                  : ['COMPLETED_15M_CONFIRMATION_IN_ZONE_REQUIRED'],
+          lastCompleted15m: data.intraday.at(-1)?.end ?? null,
+        };
+      }),
+    currentRules: config,
     note: attempts.length
       ? 'Checks use the same detector as monitoring. Latest attempted candle per direction; qualification is not an entry. Retests and confirmations use each open idea’s original rules.'
       : 'No evaluable recent breakout: check history length, completed weekly history, ATR and data quality. No provider requests were made.',
@@ -90,6 +120,9 @@ export function health(store: Store, now: number, mode: string) {
     channelSetup: setup,
     scorecard: new Scorecard(store).summary().coverage,
     threshold: new ThresholdStore(store).status(),
+    historyRepair: repairReport(store),
+    entryTiming: timingReport(store),
+    entryResearch: new EntryResearch(store).summary(now),
     paused: store.settings().paused,
     budgetPaused: store.get('budget_paused', false),
     monitoring: last
@@ -119,6 +152,8 @@ export function health(store: Store, now: number, mode: string) {
     instruments: store.monitored().map((i) => ({
       symbol: i.symbol,
       quality: store.get(`quality:${i.id}`, null),
+      trackerQuality: store.get(`tracker_quality:${i.id}`, null),
+      continuousThrough: store.get(`continuous_scan:${i.id}`, null),
       asOf: store.get(`freshness:${i.id}`, null),
       refreshError: store.get(`refresh_error:${i.id}:15m`, null),
     })),

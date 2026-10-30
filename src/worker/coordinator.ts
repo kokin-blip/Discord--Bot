@@ -3,6 +3,10 @@ import { NewsPublication } from '../news/publication.js';
 import { cachedSuggestions, type AutocompleteRequest } from '../discord/autocomplete.js';
 import { ChannelSetup } from '../discord/channel-setup.js';
 import { Scorecard } from '../scorecard.js';
+import { EntryResearch } from '../entry-research/engine.js';
+import { EntryMeasurements } from '../entry-research/measurements.js';
+import { entryReport } from '../entry-research/report.js';
+import { health } from '../insights.js';
 import { queueRelease } from '../announcements.js';
 import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
@@ -100,6 +104,20 @@ export class SignalCoordinator {
   async fetch(request: Request): Promise<Response> {
     const requestStartedAt = Date.now();
     const path = new URL(request.url).pathname;
+    // Available only through the account's Durable Object binding. The public Worker
+    // accepts signed Discord interactions and never forwards this internal path.
+    if (path === '/diagnostics' && request.method === 'GET') {
+      const commands =
+        new URL(request.url).searchParams.has('discord') && this.configured()
+          ? await this.client.rest.get(Routes.applicationCommands(this.env.DISCORD_APPLICATION_ID))
+          : undefined;
+      return Response.json({
+        build: this.env.BUILD_INFO,
+        health: health(this.store, Date.now(), 'production'),
+        entries: entryReport(this.store),
+        commands,
+      });
+    }
     if (path === '/autocomplete') {
       const message = (await request.json()) as AutocompleteRequest;
       return Response.json(
@@ -217,6 +235,13 @@ export class SignalCoordinator {
           }
         } catch {
           this.store.set('scorecard_error', 'SCORECARD_PROCESSING_FAILED');
+        }
+        try {
+          new EntryMeasurements(this.store).process(now);
+          new EntryResearch(this.store).process(now);
+          this.store.set('entry_research_error', null);
+        } catch {
+          this.store.set('entry_research_error', 'ENTRY_RESEARCH_FAILED');
         }
         stage = 'publication';
         if (this.store.settings().paused) return new Response('Paused');
@@ -386,6 +411,25 @@ export class SignalCoordinator {
         if (!scanFailed) {
           this.store.set('last_error', null);
           this.store.set('last_error_stage', null);
+        }
+        if (this.budget.tick(Date.now())) {
+          const work = this.store.get('provider_work', { startedAt: 0, requests: 0 });
+          let remaining = 24 - (work.startedAt >= tickStartedAt ? work.requests : 0);
+          try {
+            remaining -=
+              (await this.service.data?.repair?.(Date.now(), remaining, tickStartedAt)) ?? 0;
+            this.store.set('history_repair_error', null);
+          } catch {
+            this.store.set('history_repair_error', 'HISTORY_REPAIR_FAILED');
+          }
+          try {
+            this.service.data?.beginWork?.(remaining, tickStartedAt);
+            await this.publisher.enrichEntries?.(Date.now());
+          } catch {
+            this.store.set('entry_enrichment_error', 'ENTRY_ENRICHMENT_FAILED');
+          } finally {
+            this.service.data?.endWork?.();
+          }
         }
         return new Response(scanFailed ? 'Tick complete; scan failed' : 'Tick complete');
       } finally {

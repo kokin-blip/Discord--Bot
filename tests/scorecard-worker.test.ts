@@ -25,6 +25,7 @@ it('publicly defers signed scorecard commands while other commands and wrong-ser
   } as unknown as Env;
   for (const [command, guild, flags] of [
     ['scorecard', 'guild', 0],
+    ['learning', 'guild', 64],
     ['stats', 'guild', 64],
     ['scorecard', 'wrong', 64],
   ] as const) {
@@ -45,5 +46,15 @@ it('publicly defers signed scorecard commands while other commands and wrong-ser
     );
     expect(await result.json()).toMatchObject({ type: guild === 'guild' ? 5 : 4, data: { flags } });
     await Promise.all(work);
+  }
+});
+it('does not expose the coordinator diagnostic binding on the public Worker', async () => {
+  for (const method of ['GET', 'POST']) {
+    const response = await worker.fetch(
+      new Request('https://bot/diagnostics?discord=1', { method }),
+      {} as Env,
+      {} as ExecutionContext,
+    );
+    expect(response.status).toBe(404);
   }
 });

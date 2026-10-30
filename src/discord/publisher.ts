@@ -89,7 +89,12 @@ export class DiscordPublisher implements Publisher {
         nonce: BigInt(`0x${stableId(event.id, destination).slice(0, 16)}`).toString(),
         enforceNonce: true,
       }));
-    this.store.saveReceipt(event.id, destination, message.id);
+    this.store.saveReceipt(
+      event.id,
+      destination,
+      message.id,
+      message.createdTimestamp ?? this.clock(),
+    );
   }
   private async deliverThreshold(event: SignalEvent, destination: string): Promise<void> {
     const state = new ThresholdStore(this.store);
@@ -279,18 +284,23 @@ export class DiscordPublisher implements Publisher {
             m.embeds.some((e) => e.footer?.text.includes(`event ${event.id}`)),
         );
     const historical = deliveryContext(this.store, event, this.clock());
+    const fastEntry =
+      event.state === 'entry_triggered' &&
+      event.strategyVersion.startsWith('br-v1-') &&
+      !event.debug;
     let options: OptionsContext[] = [];
     if (!message) {
       let dataset: Dataset | undefined;
       try {
-        if (event.strategyVersion !== 'system')
+        if (event.strategyVersion !== 'system' && !fastEntry)
           dataset = snapshot ?? (await this.data.dataset(event.instrument, event.recordedAt));
       } catch {}
       if (
         event.instrument.market === 'equity' &&
         event.state === 'entry_triggered' &&
         !historical &&
-        this.store.settings().options
+        this.store.settings().options &&
+        !fastEntry
       ) {
         try {
           options =
@@ -333,6 +343,7 @@ export class DiscordPublisher implements Publisher {
       let image: Buffer | undefined;
       if (
         dataset &&
+        !fastEntry &&
         !(historical && event.state === 'entry_triggered') &&
         event.strategyVersion !== 'system' &&
         event.strategyVersion !== 'watch-alert-v1'
@@ -377,7 +388,9 @@ export class DiscordPublisher implements Publisher {
         embed.addFields({
           name: 'Chart',
           value:
-            'Chart unavailable or chart allowance reached; full alert details are shown above.',
+            fastEntry && !historical
+              ? 'Optional chart and options context will be added separately. Full signal details are available now.'
+              : 'Chart unavailable or chart allowance reached; full alert details are shown above.',
         });
       const imageName = event.debug ? `chart-${CHART_STYLE_VERSION}-${event.id}.png` : 'chart.png';
       if (event.debug)
@@ -409,7 +422,18 @@ export class DiscordPublisher implements Publisher {
         enforceNonce: true,
       });
     }
-    this.store.saveReceipt(event.id, destination, message.id);
+    this.store.saveReceipt(
+      event.id,
+      destination,
+      message.id,
+      message.createdTimestamp ?? this.clock(),
+    );
+    if (fastEntry && !historical)
+      this.store.db
+        .prepare(
+          "INSERT OR IGNORE INTO entry_enrichment(event_id,destination,message_id,status,next_attempt) VALUES(?,?,?,'pending',?)",
+        )
+        .run(event.id, destination, message.id, this.clock());
     if (event.debug)
       this.store.set('debug_last_delivery', {
         at: Date.now(),
@@ -475,6 +499,83 @@ export class DiscordPublisher implements Publisher {
           }));
         this.store.saveReceipt(event.id, thread.id, mirrored.id);
       }
+    }
+  }
+  /** Optional enrichment never owns the signal's delivery receipt or resends a parent post. */
+  async enrichEntries(now: number) {
+    if (this.store.settings().paused || this.store.get('budget_paused', false)) return;
+    const row = this.store.db
+      .prepare(
+        "SELECT q.*,e.body FROM entry_enrichment q JOIN events e ON e.id=q.event_id WHERE q.status='pending' AND q.next_attempt<=? ORDER BY q.next_attempt,q.event_id LIMIT 1",
+      )
+      .get(now) as
+      | {
+          event_id: string;
+          destination: string;
+          message_id: string;
+          attempts: number;
+          body: string;
+        }
+      | undefined;
+    if (!row) return;
+    const event = JSON.parse(row.body) as SignalEvent;
+    const finish = () =>
+      this.store.db
+        .prepare("UPDATE entry_enrichment SET status='complete' WHERE event_id=? AND destination=?")
+        .run(row.event_id, row.destination);
+    if (deliveryContext(this.store, event, now)) {
+      finish();
+      return;
+    }
+    try {
+      const channel = await this.validate(row.destination);
+      const message = await channel.messages.fetch(row.message_id);
+      let options: OptionsContext[] = [];
+      if (event.instrument.market === 'equity' && this.store.settings().options) {
+        try {
+          options =
+            (await this.data.equities.options?.(event.instrument, {
+              direction: event.direction,
+              price: event.candidate.entry!,
+              now,
+            })) ?? [];
+        } catch {}
+      }
+      const embed = publicCard(event, options);
+      let image: Buffer | undefined;
+      try {
+        const data = await this.data.dataset(event.instrument, event.recordedAt);
+        const frozen = {
+          ...data,
+          daily: data.daily.filter((b) => b.end <= event.marketTime),
+          weekly: data.weekly.filter((b) => b.end <= event.marketTime),
+          intraday: data.intraday.filter((b) => b.end <= event.marketTime),
+          provenance: event.provenance,
+        };
+        if (frozen.daily.length && frozen.weekly.length) {
+          const rendered = await this.charts.render(frozen, event.candidate, event);
+          if (this.budget.image(now, rendered.length)) image = rendered;
+        }
+      } catch {}
+      if (image) embed.setImage('attachment://chart.png');
+      else
+        embed.addFields({
+          name: 'Chart',
+          value:
+            'Optional chart unavailable; the original entry reference and levels are unchanged.',
+        });
+      await message.edit({
+        embeds: [embed],
+        files: image ? [new AttachmentBuilder(image, { name: 'chart.png' })] : [],
+        allowedMentions: { parse: [] },
+      });
+      finish();
+    } catch {
+      this.store.db
+        .prepare(
+          "UPDATE entry_enrichment SET attempts=attempts+1,status=CASE WHEN attempts>=2 THEN 'complete' ELSE 'pending' END,next_attempt=? WHERE event_id=? AND destination=?",
+        )
+        .run(now + 300_000, row.event_id, row.destination);
     }
   }
 }

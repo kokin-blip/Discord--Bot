@@ -1,4 +1,6 @@
 import { initializeThresholdSchema } from './threshold/store.js';
+import { initializeEntryResearch } from './entry-research/schema.js';
+import { recordTiming } from './entry-research/timing.js';
 import { initializeLearningSchema } from './learning-schema.js';
 import { initializeScorecardSchema } from './scorecard.js';
 import { watchlistChanged } from './announcements.js';
@@ -67,6 +69,7 @@ export class Store {
     initializeThresholdSchema(this.db);
     initializeLearningSchema(this.db);
     initializeScorecardSchema(this.db);
+    initializeEntryResearch(this.db);
     this.saveStrategy(this.strategy());
     saveReversal(this, currentReversal(this).config);
   }
@@ -292,6 +295,7 @@ export class Store {
           .prepare('INSERT OR IGNORE INTO events(id,idea_id,body) VALUES(?,?,?)')
           .run(e.id, e.ideaId, JSON.stringify(e)).changes;
         if (changed && publish && !e.recovery) {
+          recordTiming(this, e, true);
           const route: Route =
             e.state === 'entry_triggered' &&
             (e.kind === 'lifecycle' || (!e.kind && e.strategyVersion.startsWith('br-v1-')))
@@ -416,10 +420,16 @@ export class Store {
       .prepare('SELECT 1 FROM delivery_receipts WHERE event_id=? LIMIT 1')
       .get(eventId);
   }
-  saveReceipt(eventId: string, destination: string, messageId: string) {
-    this.db
-      .prepare('INSERT OR IGNORE INTO delivery_receipts VALUES(?,?,?)')
-      .run(eventId, destination, messageId);
+  saveReceipt(eventId: string, destination: string, messageId: string, deliveredAt = Date.now()) {
+    this.transaction(() => {
+      const changed = this.db
+        .prepare('INSERT OR IGNORE INTO delivery_receipts VALUES(?,?,?)')
+        .run(eventId, destination, messageId).changes;
+      if (changed)
+        this.db
+          .prepare('INSERT OR IGNORE INTO delivery_timings VALUES(?,?,?)')
+          .run(eventId, destination, deliveredAt);
+    });
   }
   delivered(id: string) {
     this.db

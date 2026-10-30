@@ -1,4 +1,7 @@
 import { ThresholdStore } from '../threshold/store.js';
+import { EntryResearch } from '../entry-research/engine.js';
+import { repairReport } from '../history-repair.js';
+import { timingReport } from '../entry-research/timing.js';
 import type { Dataset, SignalEvent } from '../domain.js';
 import { crypto } from '../domain.js';
 import type { Store } from '../sql-store.js';
@@ -26,6 +29,9 @@ export function debugReport(
   const calendar = store.get<{ rows: Dataset['sessions'] }>('calendar', { rows: [] });
   return {
     runtimeVersion,
+    historyRepair: repairReport(store),
+    entryTiming: timingReport(store),
+    entryResearch: new EntryResearch(store).summary(now),
     threshold: new ThresholdStore(store).status(),
     checkedAt: new Date(now).toISOString(),
     paused: settings.paused,
@@ -68,6 +74,7 @@ export function debugReport(
         return {
           symbol: instrument.symbol,
           pausedReason: store.get(`quality:${instrument.id}`, null),
+          trackerQuality: store.get(`tracker_quality:${instrument.id}`, null),
           timeframes: (['1d', '15m'] as const).map((timeframe) => {
             const cursor = store.get<TrackerCursor | null>(
               `tracker:v1:${instrument.id}:${timeframe}`,

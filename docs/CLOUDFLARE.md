@@ -60,3 +60,7 @@ See [Releases 1–3](RELEASES-1-3.md) for bounded provider work, chart reservati
 ## Dedicated entry callouts
 
 Confirmed stock/ETF and crypto entry callouts use the `entries` route. Earlier setup alerts remain in their market ideas channel and later milestones/exits use `trade-updates`. Upgrades add only the missing managed channel and preserve existing IDs/overrides. Unsent pending entry deliveries migrate to the new route; previously receipted deliveries finish their original retry path without copying posts. Existing historical-entry labels and silent recovery rules still apply.
+
+# Reliability and research operations
+
+The coordinator initializes durable repair/timing/research tables automatically on deployment. No new credentials, provider subscription, Gateway or WebSocket setup is needed. Repairs run after fresh monitoring with at most two pages and the existing shared request/time/resource bounds. Entry text publication precedes optional persisted enrichment; parent receipts remain unchanged. `/health`, `/status`, `/debug check` and `/config show` expose repair and research progress. Learning/resource pauses also suspend shadow work. See [historical collection and research](ENTRY-RESEARCH.md) for the local checkpointed tools; do not upload collection databases into the Worker.

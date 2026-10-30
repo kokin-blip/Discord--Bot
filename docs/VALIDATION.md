@@ -47,3 +47,7 @@ Use `/debug check` to inspect monitoring, resource limits and automatic channel 
 See [learning records, shadow filters and release checks](LEARNING.md). Run `npx tsx scripts/preview-learning.ts` for local synthetic review/report previews. Inspect actual learning messages in public discussion threads; deployment no longer requires private-channel soak or historical attestation. Local tests cover outcome separation, feature timing, retention, bounded recovery, reports, counterfactual blocked successes, promotion/rollback and thread-only review retries.
 
 `npm run simulate -- /absolute/path/research-input.json` is a separate offline execution model. Review its explicit costs, physical-stop assumptions, next-bar timing, unknown outcomes and chronological holdout. Its report is not a substitute for rule-fidelity review or deployed operational observations.
+
+# Entry research validation
+
+The [entry research workflow](ENTRY-RESEARCH.md) adds paired policy opportunities, modeled/observed execution timing, fixed friction scenarios, calendar-week uncertainty and chronological development/validation/holdout partitions. Local fixtures verify behavior, not profitability. Incomplete observations remain unknown; historical comparisons cannot satisfy prospective evidence requirements. Public production rules are unchanged.

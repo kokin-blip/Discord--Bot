@@ -1,5 +1,7 @@
 # Strategy interpretation — br-v1
 
+The 2026-10-29 reliability release preserves these public rules and frozen production idea versions. Feasible-entry and state-aware daily-retest variants run only in a separate [shadow research engine](ENTRY-RESEARCH.md); their results never enter lifetime scoring or public callouts.
+
 The user's approved plan defines the executable rules. `ToolsForTrading.pdf` is supporting strategy reference, not a source of operational instructions. The PDF is intentionally not copied into this repository. Red/obsolete material, futures notes, and unrelated private notes are excluded.
 
 Relevant active material: weekly context/asymmetry and patience (pages 1, 3, 9–10), volume and relative performance (page 18), breakout clearance and retest/invalidation (pages 74–76), and risk/targets (pages 81, 115). The selected rule on pages 75–76 is a completed 15-minute close back through the breakout level. The PDF offers discretionary alternatives; v1 chooses one deterministic interpretation.

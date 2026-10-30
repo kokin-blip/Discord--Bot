@@ -27,8 +27,8 @@ export class Alpaca implements MarketDataProvider {
   ) {
     this.headers = { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret };
   }
-  beginWork() {
-    this.http.beginWork();
+  beginWork(maxRequests?: number, startedAt?: number) {
+    this.http.beginWork(maxRequests, startedAt);
   }
   endWork() {
     this.http.endWork();
@@ -74,6 +74,7 @@ export class Alpaca implements MarketDataProvider {
     interval: Interval,
     start: number,
     now: number,
+    onPage?: (instrument: Instrument, bars: Bar[]) => void,
   ): Promise<Map<string, Bar[]>> {
     const result = new Map(instruments.map((i) => [i.id, [] as Bar[]]));
     const cutoff = now - 16 * 60_000;
@@ -100,6 +101,7 @@ export class Alpaca implements MarketDataProvider {
           bars: Record<string, RawBar[]>;
           next_page_token?: string;
         }>(u, this.headers);
+        const before = new Map(chunk.map((i) => [i.id, result.get(i.id)!.length]));
         for (const i of chunk)
           for (const b of response.bars[i.symbol] ?? []) {
             const date = new Intl.DateTimeFormat('en-CA', {
@@ -122,9 +124,66 @@ export class Alpaca implements MarketDataProvider {
               .push({ start: time, end, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v });
           }
         token = response.next_page_token;
+        for (const i of chunk) onPage?.(i, result.get(i.id)!.slice(before.get(i.id)!));
       } while (token);
     }
     return result;
+  }
+  async barPage(
+    i: Instrument,
+    interval: Interval | '1m',
+    start: number,
+    end: number,
+    cursor?: string,
+  ) {
+    const sessions = await this.calendar(start - DAY, end + DAY);
+    const byDate = new Map(sessions.map((s) => [s.date, s]));
+    const u = new URL('https://data.alpaca.markets/v2/stocks/bars');
+    u.search = new URLSearchParams({
+      symbols: i.symbol,
+      timeframe: interval === '1d' ? '1Day' : interval === '1m' ? '1Min' : '15Min',
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      feed: 'sip',
+      adjustment: 'all',
+      sort: 'asc',
+      limit: '10000',
+    }).toString();
+    if (cursor) u.searchParams.set('page_token', cursor);
+    const response = await this.http.json<{
+      bars: Record<string, RawBar[]>;
+      next_page_token?: string;
+    }>(u, this.headers);
+    const bars: Bar[] = [];
+    for (const b of response.bars[i.symbol] ?? []) {
+      const date = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(b.t));
+      const session = byDate.get(date);
+      if (!session) continue;
+      const time = interval === '1d' ? Date.parse(`${date}T00:00:00Z`) : Date.parse(b.t);
+      const finish =
+        interval === '1d' ? session.close : time + (interval === '1m' ? 60_000 : QUARTER);
+      if (
+        finish > end ||
+        time < start ||
+        (interval !== '1d' && (time < session.open || finish > session.close))
+      )
+        continue;
+      bars.push({
+        start: time,
+        end: finish,
+        open: b.o,
+        high: b.h,
+        low: b.l,
+        close: b.c,
+        volume: b.v,
+      });
+    }
+    return { bars, next: response.next_page_token ?? undefined };
   }
   async optionQuotes(contracts: string[], _now: number): Promise<OptionQuote[]> {
     const symbols = [...new Set(contracts)].sort();

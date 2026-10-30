@@ -3,6 +3,8 @@ import type { Store } from './sql-store.js';
 import type { Family } from './learning.js';
 import type { DailyOutcome } from './daily-recap.js';
 import type { OutcomeSample } from './shadow-learning.js';
+import type { MeasurementV2 } from './entry-research/measurements.js';
+import { netR } from './entry-research/execution.js';
 import { stableId, strategyVersion } from './core/strategy.js';
 import { DAY } from './core/time.js';
 import { currentReversal } from './reversal-config.js';
@@ -341,7 +343,10 @@ export class LearningEvaluations {
       family,
       version,
       kind,
-      definition,
+      definition:
+        family === 'strategy_entry'
+          ? { ...definition, executionSchema: 'execution-v2' }
+          : definition,
       policy,
       startedAt: now,
       endsAt: now + policy.days * DAY,
@@ -407,12 +412,18 @@ export class LearningEvaluations {
   rows(evaluation: Evaluation, deliveredOnly = false): EvidenceRow[] {
     const rows = this.store.db
       .prepare(
-        `SELECT d.body,j.body AS journal,m.body AS measurement FROM learning_decisions d
+        `SELECT d.body,j.body AS journal,m.body AS measurement,v.body AS measurement_v2 FROM learning_decisions d
       LEFT JOIN learning_journal j ON j.id=d.sample_id LEFT JOIN learning_measurements m ON m.sample_id=d.sample_id
+      LEFT JOIN learning_measurements_v2 v ON v.sample_id=d.sample_id
       WHERE d.evaluation_id=? ${deliveredOnly ? "AND EXISTS(SELECT 1 FROM delivery_receipts r WHERE r.event_id=json_extract(d.body,'$.callout.id'))" : ''}
       ORDER BY d.callout_time,d.id LIMIT 5001`,
       )
-      .all(evaluation.id) as { body: string; journal?: string; measurement?: string }[];
+      .all(evaluation.id) as {
+      body: string;
+      journal?: string;
+      measurement?: string;
+      measurement_v2?: string;
+    }[];
     return rows.map((row) => {
       const decision: Decision = JSON.parse(row.body);
       const sample: OutcomeSample | undefined = row.journal ? JSON.parse(row.journal) : undefined;
@@ -421,17 +432,29 @@ export class LearningEvaluations {
         : undefined;
       const outcome =
         sample?.terminal.recovery || sample?.terminal.debug ? 'unknown' : sample?.outcome;
+      const v2: MeasurementV2 | undefined = row.measurement_v2
+        ? JSON.parse(row.measurement_v2)
+        : undefined;
       return {
         ...decision,
         outcome: outcome ?? (measurement ? 'unknown' : undefined),
         simulationR:
-          measurement?.execution?.status === 'closed' &&
-          !measurement.incomplete &&
-          !sample?.terminal.recovery &&
-          !sample?.terminal.debug
-            ? measurement.execution.rMultiple
-            : undefined,
-        settled: !!measurement && (!!sample || !!measurement.incomplete),
+          evaluation.family === 'strategy_entry' &&
+          evaluation.definition.executionSchema === 'execution-v2'
+            ? !sample?.terminal.recovery && !sample?.terminal.debug && !v2?.incomplete
+              ? netR(v2?.economics)
+              : undefined
+            : measurement?.execution?.status === 'closed' &&
+                !measurement.incomplete &&
+                !sample?.terminal.recovery &&
+                !sample?.terminal.debug
+              ? measurement.execution.rMultiple
+              : undefined,
+        settled:
+          evaluation.family === 'strategy_entry' &&
+          evaluation.definition.executionSchema === 'execution-v2'
+            ? !!v2 && (!!sample || !!v2.incomplete)
+            : !!measurement && (!!sample || !!measurement.incomplete),
       };
     });
   }
@@ -450,6 +473,14 @@ export class LearningEvaluations {
         : strategyVersion(this.store.strategy());
     if (active !== evaluation.version && !result.blockers.includes('SOURCE_VERSION_CHANGED')) {
       result.blockers.push('SOURCE_VERSION_CHANGED');
+      result.reviewReady = false;
+    }
+    if (
+      evaluation.family === 'strategy_entry' &&
+      evaluation.definition.executionSchema !== 'execution-v2'
+    ) {
+      if (!result.blockers.includes('FRESH_EXECUTION_V2_COHORT_REQUIRED'))
+        result.blockers.push('FRESH_EXECUTION_V2_COHORT_REQUIRED');
       result.reviewReady = false;
     }
     return result;
