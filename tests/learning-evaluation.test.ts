@@ -18,11 +18,15 @@ import { Learning } from '../src/learning.js';
 import type { SignalEvent } from '../src/domain.js';
 
 const start = Date.parse('2026-01-01T12:00:00Z');
+const entryTemplates = new Map<'bullish' | 'bearish', SignalEvent>();
 function event(id: string, at = start, direction: 'bullish' | 'bearish' = 'bullish'): SignalEvent {
-  const data = fixture(direction);
-  const event = structuredClone(
-    advance(idea(data), data, defaults, data.provenance.asOf).events.at(-1)!,
-  );
+  let template = entryTemplates.get(direction);
+  if (!template) {
+    const data = fixture(direction);
+    template = advance(idea(data), data, defaults, data.provenance.asOf).events.at(-1)!;
+    entryTemplates.set(direction, template);
+  }
+  const event = structuredClone(template);
   Object.assign(event, {
     id,
     ideaId: id,

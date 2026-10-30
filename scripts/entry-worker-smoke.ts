@@ -55,9 +55,6 @@ try {
         },
       }),
     });
-  const diagnostics = await stub.fetch('https://internal/diagnostics');
-  if (!diagnostics.ok || !((await diagnostics.json()) as { entries?: unknown }).entries)
-    throw new Error('Internal diagnostics failed');
   const response = await request();
   if (!response.ok)
     throw new Error(`Schema initialization failed: ${response.status} ${await response.text()}`);

@@ -5,8 +5,7 @@ import { ChannelSetup } from '../discord/channel-setup.js';
 import { Scorecard } from '../scorecard.js';
 import { EntryResearch } from '../entry-research/engine.js';
 import { EntryMeasurements } from '../entry-research/measurements.js';
-import { entryReport } from '../entry-research/report.js';
-import { health } from '../insights.js';
+import { logEntryRuntime } from '../entry-research/telemetry.js';
 import { queueRelease } from '../announcements.js';
 import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
@@ -104,20 +103,6 @@ export class SignalCoordinator {
   async fetch(request: Request): Promise<Response> {
     const requestStartedAt = Date.now();
     const path = new URL(request.url).pathname;
-    // Available only through the account's Durable Object binding. The public Worker
-    // accepts signed Discord interactions and never forwards this internal path.
-    if (path === '/diagnostics' && request.method === 'GET') {
-      const commands =
-        new URL(request.url).searchParams.has('discord') && this.configured()
-          ? await this.client.rest.get(Routes.applicationCommands(this.env.DISCORD_APPLICATION_ID))
-          : undefined;
-      return Response.json({
-        build: this.env.BUILD_INFO,
-        health: health(this.store, Date.now(), 'production'),
-        entries: entryReport(this.store),
-        commands,
-      });
-    }
     if (path === '/autocomplete') {
       const message = (await request.json()) as AutocompleteRequest;
       return Response.json(
@@ -431,6 +416,7 @@ export class SignalCoordinator {
             this.service.data?.endWork?.();
           }
         }
+        logEntryRuntime(this.store, this.env.BUILD_INFO?.id, Date.now());
         return new Response(scanFailed ? 'Tick complete; scan failed' : 'Tick complete');
       } finally {
         this.busy = false;
