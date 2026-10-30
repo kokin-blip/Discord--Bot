@@ -90,6 +90,12 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     if (!env.DISCORD_GUILD_ID) return;
     const stub = env.SIGNALS.get(env.SIGNALS.idFromName(env.DISCORD_GUILD_ID));
-    ctx.waitUntil(stub.fetch('https://internal/tick', { method: 'POST' }).then(() => {}));
+    ctx.waitUntil(
+      stub.fetch('https://internal/tick', { method: 'POST' }).then(async (response) => {
+        const snapshot = response.ok ? response.headers.get('X-Entry-Runtime') : null;
+        if (snapshot) console.info('entry-reliability', snapshot);
+        if (!response.ok) console.warn('coordinator-tick', await failureMessage(response));
+      }),
+    );
   },
 };

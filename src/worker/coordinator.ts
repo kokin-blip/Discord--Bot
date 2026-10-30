@@ -5,7 +5,7 @@ import { ChannelSetup } from '../discord/channel-setup.js';
 import { Scorecard } from '../scorecard.js';
 import { EntryResearch } from '../entry-research/engine.js';
 import { EntryMeasurements } from '../entry-research/measurements.js';
-import { logEntryRuntime } from '../entry-research/telemetry.js';
+import { entryRuntimeSnapshot } from '../entry-research/telemetry.js';
 import { queueRelease } from '../announcements.js';
 import { Learning } from '../learning.js';
 import type { DurableObjectState } from '@cloudflare/workers-types';
@@ -416,8 +416,10 @@ export class SignalCoordinator {
             this.service.data?.endWork?.();
           }
         }
-        logEntryRuntime(this.store, this.env.BUILD_INFO?.id, Date.now());
-        return new Response(scanFailed ? 'Tick complete; scan failed' : 'Tick complete');
+        const snapshot = entryRuntimeSnapshot(this.store, this.env.BUILD_INFO?.id, Date.now());
+        return new Response(scanFailed ? 'Tick complete; scan failed' : 'Tick complete', {
+          headers: snapshot ? { 'X-Entry-Runtime': JSON.stringify(snapshot) } : undefined,
+        });
       } finally {
         this.busy = false;
       }
